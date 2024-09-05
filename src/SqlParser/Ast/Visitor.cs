@@ -10,57 +10,63 @@ public enum ControlFlow
 
 public interface IElement
 {
-    public ControlFlow Visit(Visitor visitor)
+    public IElement Visit(Visitor visitor)
     {
         switch (this)
         {
-            case TableFactor t:
-            {
-                visitor.PreVisitTableFactor(t);
-
-                if (t is TableFactor.Table table)
+            case Query q:
                 {
-                    visitor.PreVisitRelation(table.Name);
-                    VisitChildren(this, visitor);
-                    visitor.PostVisitRelation(table.Name);
+                    q = visitor.PreVisitQuery(q);
+                    q = VisitChildren(q, visitor);
+                    return visitor.PostVisitQuery(q);
                 }
-
-                visitor.PostVisitTableFactor(t);
-                return ControlFlow.Continue;
-            }
+            case ObjectName o:
+                {
+                    o = visitor.PreVisitRelation(o);
+                    o = VisitChildren(o, visitor);
+                    return visitor.PostVisitRelation(o);
+                }
+            case TableFactor t:
+                {
+                    t = visitor.PreVisitTableFactor(t);
+                    t = VisitChildren(t, visitor);
+                    return visitor.PostVisitTableFactor(t);
+                }
 
             case Expression e:
                 {
-                    var flow = visitor.PreVisitExpression(e);
-
-                    if (flow == ControlFlow.Break)
-                    {
-                        return flow;
-                    }
-                    VisitChildren(this, visitor);
+                    e = visitor.PreVisitExpression(e);
+                    e = VisitChildren(e, visitor);
                     return visitor.PostVisitExpression(e);
                 }
 
             case Statement s:
                 {
-                    var flow = visitor.PreVisitStatement(s);
-                    if (flow == ControlFlow.Break)
-                    {
-                        return flow;
-                    }
-
-                    VisitChildren(this, visitor);
+                    s = visitor.PreVisitStatement(s);
+                    s = VisitChildren(s, visitor);
                     return visitor.PostVisitStatement(s);
                 }
 
             default:
-                VisitChildren(this, visitor);
-                return ControlFlow.Continue;
+                var element = this;
+                var preVisit = visitor.GetCustomPreVisit(GetType());
+                if (preVisit != null)
+                {
+                    element = preVisit(element);
+                }
+                element = VisitChildren(element, visitor);
+                var postVisit = visitor.GetCustomPostVisit(GetType());
+                if (postVisit != null)
+                {
+                    element = postVisit(element);
+                }
+                return element;
         }
     }
 
-    private static void VisitChildren(IElement element, Visitor visitor)
+    private static T VisitChildren<T>(T element, Visitor visitor) where T : IElement
     {
+        var cloneMethod = element.GetType().GetMethod("<Clone>$");
         var properties = GetVisitableChildProperties(element);
 
         foreach (var property in properties)
@@ -78,8 +84,14 @@ public interface IElement
             }
 
             var child = (IElement)value;
-            child.Visit(visitor);
+            var newOne = child.Visit(visitor);
+            if (newOne != child)
+            {
+                element = (T)cloneMethod.Invoke(element, null);
+                property.SetValue(element, newOne);
+            }
         }
+        return element;
     }
 
     internal static IReadOnlyList<PropertyInfo> GetVisitableChildProperties(IElement element)
@@ -117,7 +129,7 @@ public interface IElement
 
             var decoratedParameters = constructorParams.Where(p => p.GetCustomAttribute<VisitAttribute>() != null)
                 .OrderBy(p => p.GetCustomAttribute<VisitAttribute>()!.Order)
-                .Select(p => (Property:p, p.GetCustomAttribute<VisitAttribute>()!.Order))
+                .Select(p => (Property: p, p.GetCustomAttribute<VisitAttribute>()!.Order))
                 .ToList();
 
             foreach (var param in decoratedParameters)
@@ -139,54 +151,72 @@ public interface IElement
 
 public abstract class Visitor
 {
-    public virtual ControlFlow PreVisitQuery(Query query)
+    private Dictionary<Type, Func<IElement, IElement>> _customPreVisit = new();
+    private Dictionary<Type, Func<IElement, IElement>> _customPostVisit = new();
+    protected void RegisterCustomPreVisit<T>(Func<T, T> visitor) where T : IElement
     {
-        return ControlFlow.Continue;
+        _customPreVisit[typeof(T)] = e => visitor((T)e);
     }
-   
-    public virtual ControlFlow PostVisitQuery(Query query)
+    protected void RegisterCustomPostVisit<T>(Func<T, T> visitor) where T : IElement
     {
-        return ControlFlow.Continue;
+        _customPostVisit[typeof(T)] = e => visitor((T)e);
     }
-
-    public virtual ControlFlow PreVisitTableFactor(TableFactor tableFactor)
+    internal Func<IElement, IElement> GetCustomPreVisit(Type type)
     {
-        return ControlFlow.Continue;
+        return _customPreVisit.TryGetValue(type, out var visit) ? visit : null;
     }
-
-    public virtual ControlFlow PostVisitTableFactor(TableFactor tableFactor)
+    internal Func<IElement, IElement> GetCustomPostVisit(Type type)
     {
-        return ControlFlow.Continue;
+        return _customPostVisit.TryGetValue(type, out var visit) ? visit : null;
     }
-
-    public virtual ControlFlow PreVisitRelation(ObjectName relation)
+    public virtual Query PreVisitQuery(Query query)
     {
-        return ControlFlow.Continue;
+        return query;
     }
 
-    public virtual ControlFlow PostVisitRelation(ObjectName relation)
+    public virtual Query PostVisitQuery(Query query)
     {
-        return ControlFlow.Continue;
+        return query;
     }
 
-    public virtual ControlFlow PreVisitExpression(Expression expression)
+    public virtual TableFactor PreVisitTableFactor(TableFactor tableFactor)
     {
-        return ControlFlow.Continue;
+        return tableFactor;
     }
 
-    public virtual ControlFlow PostVisitExpression(Expression expression)
+    public virtual TableFactor PostVisitTableFactor(TableFactor tableFactor)
     {
-        return ControlFlow.Continue;
+        return tableFactor;
     }
 
-    public virtual ControlFlow PreVisitStatement(Statement statement)
+    public virtual ObjectName PreVisitRelation(ObjectName relation)
     {
-        return ControlFlow.Continue;
+        return relation;
     }
 
-    public virtual ControlFlow PostVisitStatement(Statement statement)
+    public virtual ObjectName PostVisitRelation(ObjectName relation)
     {
-        return ControlFlow.Continue;
+        return relation;
+    }
+
+    public virtual Expression PreVisitExpression(Expression expression)
+    {
+        return expression;
+    }
+
+    public virtual Expression PostVisitExpression(Expression expression)
+    {
+        return expression;
+    }
+
+    public virtual Statement PreVisitStatement(Statement statement)
+    {
+        return statement;
+    }
+
+    public virtual Statement PostVisitStatement(Statement statement)
+    {
+        return statement;
     }
 
 }

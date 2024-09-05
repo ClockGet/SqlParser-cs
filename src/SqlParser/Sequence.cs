@@ -88,16 +88,19 @@ public class Sequence<T> : List<T>, IWriteSql, IElement
         }
     }
 
-    public ControlFlow Visit(Visitor visitor)
+    IElement IElement.Visit(Visitor visitor)
     {
-        if (!typeof(T).IsAssignableTo(typeof(IElement)))
+        if (!typeof(IElement).IsAssignableFrom(typeof(T)))
         {
-            return ControlFlow.Continue;
+            return this;
         }
-
-        return this.Select(item => (item as IElement)!
-            .Visit(visitor))
-            .FirstOrDefault(control => control == ControlFlow.Break);
+        var elements = this.OfType<T>().ToArray();
+        var collection = elements.Select(p => (T)((IElement)p).Visit(visitor)).ToArray();
+        if(collection.SequenceEqual(elements))
+        {
+            return this;
+        }
+        return new Sequence<T>(collection);
     }
 
     public static implicit operator T[](Sequence<T> list)

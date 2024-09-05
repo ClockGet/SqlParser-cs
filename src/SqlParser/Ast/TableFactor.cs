@@ -14,7 +14,7 @@ public abstract record TableFactor : IWriteSql, IElement
     /// </summary>
     /// <param name="SubQuery">Subquery</param>
     /// <param name="Lateral">True if lateral</param>
-    public record Derived(Query SubQuery, bool Lateral = false) : TableFactor
+    public record Derived([Visit(0)] Query SubQuery, bool Lateral = false) : TableFactor
     {
         public override void ToSql(SqlTextWriter writer)
         {
@@ -32,7 +32,7 @@ public abstract record TableFactor : IWriteSql, IElement
         }
     }
 
-    public record Function(bool Lateral, ObjectName Name, Sequence<FunctionArg> Args) : TableFactor
+    public record Function(bool Lateral, [Visit(0)] ObjectName Name, [Visit(2)] Sequence<FunctionArg> Args) : TableFactor
     {
         public override void ToSql(SqlTextWriter writer)
         {
@@ -104,9 +104,9 @@ public abstract record TableFactor : IWriteSql, IElement
     /// <summary>
     /// Unpivot table factor
     /// </summary>
-    public record Unpivot(TableFactor TableFactor, Ident Value, Ident Name, Sequence<Ident> Columns) : TableFactor
+    public record Unpivot([Visit(0)] TableFactor TableFactor, [Visit(2)] Ident Value, [Visit(3)] Ident Name, [Visit(4)] Sequence<Ident> Columns) : TableFactor
     {
-        public TableAlias? PivotAlias { get; set; }
+        [Visit(5)] public TableAlias? PivotAlias { get; set; }
 
         public override void ToSql(SqlTextWriter writer)
         {
@@ -141,7 +141,6 @@ public abstract record TableFactor : IWriteSql, IElement
 
         /// Optional version qualifier to facilitate table time-travel, as supported by BigQuery and MSSQL.
         public TableVersion? Version { get; init; }
-        public bool WithOrdinality { get; init; }
 
         public override void ToSql(SqlTextWriter writer)
         {
@@ -150,11 +149,6 @@ public abstract record TableFactor : IWriteSql, IElement
             if (Args != null)
             {
                 writer.WriteSql($"({Args})");
-            }
-
-            if(WithOrdinality)
-            {
-                writer.Write(" WITH ORDINALITY");
             }
 
             if (Alias != null)
@@ -212,16 +206,10 @@ public abstract record TableFactor : IWriteSql, IElement
     {
         public bool WithOffset { get; init; }
         public Ident? WithOffsetAlias { get; init; }
-        public bool WithOrdinality { get; set; }
 
         public override void ToSql(SqlTextWriter writer)
         {
             writer.Write($"UNNEST({ArrayExpressions.ToSqlDelimited()})");
-         
-            if (WithOrdinality)
-            {
-                writer.Write(" WITH ORDINALITY");
-            }
 
             if (Alias != null)
             {
