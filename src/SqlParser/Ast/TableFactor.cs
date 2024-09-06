@@ -77,10 +77,10 @@ public abstract record TableFactor : IWriteSql, IElement
     public record Pivot(
         [property: Visit(0)] TableFactor TableFactor,
         [property: Visit(2)] Sequence<ExpressionWithAlias> AggregateFunctions,
-        Sequence<Ident> ValueColumns,
-        PivotValueSource ValueSource,
-        Expression? DefaultOnNull,
-        TableAlias? PivotAlias = null
+        [property: Visit(3)] Sequence<Ident> ValueColumns,
+        [property: Visit(4)] PivotValueSource ValueSource,
+        [property: Visit(5)] Expression? DefaultOnNull,
+        [property: Visit(6)] TableAlias? PivotAlias = null
         ) : TableFactor
     {
         public override void ToSql(SqlTextWriter writer)
