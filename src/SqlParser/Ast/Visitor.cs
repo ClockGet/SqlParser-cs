@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Collections.Immutable;
+using System.Reflection;
 
 namespace SqlParser.Ast;
 
@@ -64,6 +65,34 @@ public interface IElement
         }
     }
 
+    public IEnumerable<IElement> Descendants()
+    {
+        var properties = GetVisitableChildProperties(this);
+        var stack = new Stack<IElement>();
+        stack.Push(this);
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+
+            var currentProperties = GetVisitableChildProperties(current);
+            foreach (var property in currentProperties)
+            {
+                if (!property.PropertyType.IsAssignableTo(typeof(IElement)))
+                {
+                    continue;
+                }
+
+                if (property.GetValue(current) is IElement value)
+                {
+                    yield return value;
+                    stack.Push(value);
+                }
+            }
+        }
+    }
+
+
     private static T VisitChildren<T>(T element, Visitor visitor) where T : IElement
     {
         var cloneMethod = element.GetType().GetMethod("<Clone>$");
@@ -94,58 +123,82 @@ public interface IElement
         return element;
     }
 
+    private static ImmutableDictionary<Type, IReadOnlyList<PropertyInfo>> _propertiesCache = ImmutableDictionary.Create<Type, IReadOnlyList<PropertyInfo>>();
+
     internal static IReadOnlyList<PropertyInfo> GetVisitableChildProperties(IElement element)
     {
         var elementType = element.GetType();
-
-        // Public and not static
-        var properties = elementType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var decorated = properties.Where(p => p.GetCustomAttribute<VisitAttribute>() != null)
-            .OrderBy(p => p.GetCustomAttribute<VisitAttribute>()!.Order)
-            .ToList();
-
-        // No decorated properties uses the default visit order.
-        // No need to look for additional properties
-        if (!decorated.Any())
+        var oldCache = _propertiesCache;
+        if (oldCache.TryGetValue(elementType, out var result))
         {
-            return properties;
+            return result;
         }
-
-        // Visit orders are not specified in the constructor; return the decorated list.
-        if (decorated.Count == properties.Length)
+        while (true)
         {
-            return decorated;
-        }
-
-        // Although identified as properties, primary constructor parameters 
-        // use parameter attributes, not property attributes and must be identified
-        // apart from the property list. This find their order and inserts
-        // the missing properties into the decorated property list.
-        try
-        {
-            var constructors = elementType.GetConstructors();
-            var primaryConstructor = constructors.Single();
-            var constructorParams = primaryConstructor.GetParameters();
-
-            var decoratedParameters = constructorParams.Where(p => p.GetCustomAttribute<VisitAttribute>() != null)
-                .OrderBy(p => p.GetCustomAttribute<VisitAttribute>()!.Order)
-                .Select(p => (Property: p, p.GetCustomAttribute<VisitAttribute>()!.Order))
-                .ToList();
-
-            foreach (var param in decoratedParameters)
+            var newCache = oldCache.Add(elementType, GetVisitableChildPropertiesCore());
+            if(Interlocked.CompareExchange(ref _propertiesCache, newCache, oldCache) == oldCache || _propertiesCache.ContainsKey(elementType))
             {
-                var property = properties.FirstOrDefault(p => p.Name == param.Property.Name);
-
-                if (property != null)
-                {
-                    decorated.Insert(param.Order, property);
-                }
+                break;
+            }
+            oldCache = _propertiesCache;
+            if (oldCache.TryGetValue(elementType, out result))
+            {
+                return result;
             }
         }
-        // ReSharper disable once EmptyGeneralCatchClause
-        catch { }
+        return _propertiesCache[elementType];
 
-        return decorated;
+        IReadOnlyList<PropertyInfo> GetVisitableChildPropertiesCore()
+        {
+            // Public and not static
+            var properties = elementType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            var decorated = properties.Where(p => p.GetCustomAttribute<VisitAttribute>() != null)
+                .OrderBy(p => p.GetCustomAttribute<VisitAttribute>()!.Order)
+                .ToList();
+
+            // No decorated properties uses the default visit order.
+            // No need to look for additional properties
+            if (!decorated.Any())
+            {
+                return properties;
+            }
+
+            // Visit orders are not specified in the constructor; return the decorated list.
+            if (decorated.Count == properties.Length)
+            {
+                return decorated;
+            }
+
+            // Although identified as properties, primary constructor parameters 
+            // use parameter attributes, not property attributes and must be identified
+            // apart from the property list. This find their order and inserts
+            // the missing properties into the decorated property list.
+            try
+            {
+                var constructors = elementType.GetConstructors();
+                var primaryConstructor = constructors.Single();
+                var constructorParams = primaryConstructor.GetParameters();
+
+                var decoratedParameters = constructorParams.Where(p => p.GetCustomAttribute<VisitAttribute>() != null)
+                    .OrderBy(p => p.GetCustomAttribute<VisitAttribute>()!.Order)
+                    .Select(p => (Property: p, p.GetCustomAttribute<VisitAttribute>()!.Order))
+                    .ToList();
+
+                foreach (var param in decoratedParameters)
+                {
+                    var property = properties.FirstOrDefault(p => p.Name == param.Property.Name);
+
+                    if (property != null)
+                    {
+                        decorated.Insert(param.Order, property);
+                    }
+                }
+            }
+            // ReSharper disable once EmptyGeneralCatchClause
+            catch { }
+
+            return decorated;
+        }
     }
 }
 

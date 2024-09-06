@@ -96,12 +96,29 @@ public class Sequence<T> : List<T>, IWriteSql, IElement
         }
         var elements = this.OfType<T>().ToArray();
         var collection = elements.Select(p => (T)((IElement)p).Visit(visitor)).ToArray();
-        if(collection.SequenceEqual(elements))
+        if (collection.SequenceEqual(elements))
         {
             return this;
         }
         return new Sequence<T>(collection);
     }
+
+    IEnumerable<IElement> IElement.Descendants()
+    {
+        if (!typeof(IElement).IsAssignableFrom(typeof(T)))
+        {
+            yield break;
+        }
+        foreach (var element in this.OfType<IElement>())
+        {
+            yield return element;
+            foreach (var descendant in element.Descendants())
+            {
+                yield return descendant;
+            }
+        }
+    }
+
 
     public static implicit operator T[](Sequence<T> list)
     {

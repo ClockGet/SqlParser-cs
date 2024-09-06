@@ -1,6 +1,6 @@
 ﻿namespace SqlParser.Ast;
 
-public abstract record PivotValueSource : IWriteSql
+public abstract record PivotValueSource : IWriteSql, IElement
 {
     public record List(Sequence<ExpressionWithAlias> Values) : PivotValueSource;
     public record Any(Sequence<OrderByExpression>? OrderBy) : PivotValueSource;

@@ -23,7 +23,7 @@ public abstract record FunctionArguments : IWriteSql, IElement
 public record FunctionArgumentList(
     DuplicateTreatment? DuplicateTreatment,
     Sequence<FunctionArg> Args,
-    Sequence<FunctionArgumentClause>? Clauses) : IWriteSql
+    Sequence<FunctionArgumentClause>? Clauses) : IWriteSql, IElement
 {
     public static FunctionArgumentList Empty()
     {
@@ -46,7 +46,7 @@ public record FunctionArgumentList(
     }
 }
 
-public abstract record FunctionArgumentClause : IWriteSql
+public abstract record FunctionArgumentClause : IWriteSql, IElement
 {
     public record IgnoreOrRespectNulls(NullTreatment NullTreatment) : FunctionArgumentClause;
     public record OrderBy(Sequence<OrderByExpression> OrderByExpressions) : FunctionArgumentClause;
@@ -222,7 +222,7 @@ public abstract record FunctionArgOperator : IWriteSql, IElement
 /// <summary>
 /// Create function body
 /// </summary>
-public record CreateFunctionBody(Expression Expression) : IWriteSql
+public record CreateFunctionBody(Expression Expression) : IWriteSql, IElement
 {
     public record AsBeforeOptions(Expression Expression) : CreateFunctionBody(Expression);
     public record AsAfterOptions(Expression Expression) : CreateFunctionBody(Expression);
