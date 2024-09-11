@@ -114,7 +114,7 @@ public interface IElement
 
             var child = (IElement)value;
             var newOne = child.Visit(visitor);
-            if (newOne != child)
+            if ((object)newOne != child)
             {
                 element = (T)cloneMethod.Invoke(element, null);
                 property.SetValue(element, newOne);
