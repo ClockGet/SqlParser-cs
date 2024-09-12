@@ -124,6 +124,7 @@ public abstract record TableFactor : IWriteSql, IElement
     /// <param name="Name">Object name</param>
     public record Table(
         [property: Visit(0)] ObjectName Name,
+        /// Optional version qualifier to facilitate table time-travel, as supported by BigQuery and MSSQL.
         TableVersion? Version = null,
         Sequence<Ident>? Partitions = null)
         : TableFactor
@@ -139,8 +140,6 @@ public abstract record TableFactor : IWriteSql, IElement
         /// MSSQL-specific `WITH (...)` hints such as NOLOCK.
         [Visit(3)] public Sequence<Expression>? WithHints { get; init; }
 
-        /// Optional version qualifier to facilitate table time-travel, as supported by BigQuery and MSSQL.
-        public TableVersion? Version { get; init; }
         public bool WithOrdinality { get; init; }
 
         public override void ToSql(SqlTextWriter writer)
@@ -286,8 +285,7 @@ public abstract record TableFactor : IWriteSql, IElement
         RowsPerMatch? RowsPerMatch,
         AfterMatchSkip? AfterMatchSkip,
         MatchRecognizePattern Pattern,
-        Sequence<SymbolDefinition> Symbols,
-        TableAlias? Alias
+        Sequence<SymbolDefinition> Symbols
     ) : TableFactor
     {
         public override void ToSql(SqlTextWriter writer)

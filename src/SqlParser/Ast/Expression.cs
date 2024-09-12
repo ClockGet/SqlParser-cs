@@ -208,7 +208,8 @@ public abstract record Expression : IWriteSql, IElement
             {
                 CastKind.Cast => "CAST",
                 CastKind.TryCast => "TRY_CAST",
-                CastKind.SafeCast => "SAFE_CAST"
+                CastKind.SafeCast => "SAFE_CAST",
+                _ => throw new NotSupportedException($"Unsupported cast kind: {Kind}"),
             };
           
             if (Format != null)

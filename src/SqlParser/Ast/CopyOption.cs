@@ -49,11 +49,25 @@ public abstract record CopyTarget : IWriteSql, IElement
 /// <summary>
 /// Copy source
 /// </summary>
-public abstract record CopySource : IElement
+public abstract record CopySource : IElement, IWriteSql
 {
     public record Table(ObjectName TableName, Sequence<Ident> Columns) : CopySource;
 
     public record CopySourceQuery(Query? Query) : CopySource;
+
+    public void ToSql(SqlTextWriter writer)
+    {
+        switch (this)
+        {
+            case Table t:
+                writer.WriteSql($"{t.TableName} ({t.Columns.ToSqlDelimited()})");
+                break;
+
+            case CopySourceQuery q:
+                writer.WriteSql($"({q.Query})");
+                break;
+        }
+    }
 }
 /// <summary>
 /// Copy options

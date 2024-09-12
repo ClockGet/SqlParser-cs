@@ -8409,8 +8409,10 @@ public partial class Parser
             rowsPerMatch,
             afterMatchSkip,
             pattern,
-            symbols,
-            alias);
+            symbols)
+        {
+            Alias = alias
+        };
     }
 
     public MatchRecognizePattern ParseBasePattern()
