@@ -241,6 +241,12 @@ public enum DuplicateTreatment
     All,
 }
 
+public enum ExtractSyntax
+{
+    From,
+    Comma
+}
+
 public enum FileFormat
 {
     None,
@@ -307,7 +313,7 @@ public enum GeneratedAs
 
 public enum GeneratedExpressionMode
 {
-    Virtual, 
+    Virtual,
     Sorted
 }
 
@@ -478,6 +484,12 @@ public enum ReferentialAction
     SetDefault
 }
 
+public enum StructBracketKind
+{
+    Parentheses,
+    AngleBrackets
+}
+
 public enum SearchModifier
 {
     None,
@@ -568,6 +580,31 @@ public enum TransactionIsolationLevel
     ReadCommitted,
     RepeatableRead,
     Serializable
+}
+
+public enum TriggerExecBodyType
+{
+    Function,
+    Procedure,
+}
+
+public enum TriggerObject
+{
+    Row,
+    Statement
+}
+
+public enum TriggerPeriod
+{
+    After,
+    Before,
+    InsteadOf,
+}
+
+public enum TriggerReferencingType
+{
+    OldTable,
+    NewTable,
 }
 
 public enum TrimWhereField

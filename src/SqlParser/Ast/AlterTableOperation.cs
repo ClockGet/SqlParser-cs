@@ -80,6 +80,21 @@ public abstract record AlterTableOperation : IWriteSql
             writer.WriteSql($"ADD{ifNot} {NewPartitions.ToSqlDelimited(Symbols.Space)}");
         }
     }
+
+    public record AddProjection(bool IfNotExists,  Ident Name, ProjectionSelect Select) : AlterTableOperation, IIfNotExists
+    {
+        public override void ToSql(SqlTextWriter writer)
+        {
+            writer.WriteSql($"ADD PROJECTION");
+
+            if (IfNotExists)
+            {
+                writer.Write($" {IIfNotExists.IfNotExistsPhrase}");
+            }
+
+            writer.WriteSql($" {Name} ({Select})");
+        }
+    }
     /// <summary>
     /// Alter column table operation
     /// <example>
@@ -95,6 +110,28 @@ public abstract record AlterTableOperation : IWriteSql
         public override void ToSql(SqlTextWriter writer)
         {
             writer.WriteSql($"ALTER COLUMN {ColumnName} {Operation}");
+        }
+    }
+    /// <summary>
+    /// `ATTACH PART|PARTITION partition_expr`
+    /// </summary>
+    /// <param name="Partition">Partition</param>
+    public record AttachPartition(Partition Partition) : AlterTableOperation
+    {
+        public override void ToSql(SqlTextWriter writer)
+        {
+            writer.WriteSql($"ATTACH {Partition}");
+        }
+    }
+    /// <summary>
+    /// `DETACH PART|PARTITION partition_expr`
+    /// </summary>
+    /// <param name="Partition">Partition</param>
+    public record DetachPartition(Partition Partition) : AlterTableOperation
+    {
+        public override void ToSql(SqlTextWriter writer)
+        {
+            writer.WriteSql($"DETACH {Partition}");
         }
     }
     /// <summary>
@@ -279,7 +316,21 @@ public abstract record AlterTableOperation : IWriteSql
             writer.WriteSql($"ENABLE TRIGGER {Name}");
         }
     }
+    /// <summary>
+    /// FREEZE PARTITION partition_expr
+    /// </summary>
+    public record FreezePartition(Partition Partition, Ident? WithName = null) : AlterTableOperation
+    {
+        public override void ToSql(SqlTextWriter writer)
+        {
+            writer.WriteSql($"FREEZE {Partition}");
 
+            if (WithName != null)
+            {
+                writer.WriteSql($" WITH NAME {WithName}");
+            }
+        }
+    }
     /// <summary>
     /// CHANGE [ COLUMN ] col_name data_type [ options ]
     /// </summary>
@@ -305,7 +356,6 @@ public abstract record AlterTableOperation : IWriteSql
             }
         }
     }
-    
     /// <summary>
     /// Rename partitions table operation
     /// <example>
@@ -428,6 +478,20 @@ public abstract record AlterTableOperation : IWriteSql
             writer.WriteSql($"OWNER TO {NewOwner}");
         }
     }
+    /// <summary>
+    /// UNFREEZE PARTITION partition_expr
+    /// </summary>
+    public record UnfreezePartition(Partition Partition, Ident? WithName = null) : AlterTableOperation
+    {
+        public override void ToSql(SqlTextWriter writer)
+        {
+            writer.WriteSql($"UNFREEZE {Partition}");
 
+            if (WithName != null)
+            {
+                writer.WriteSql($" WITH NAME {WithName}");
+            }
+        }
+    }
     public abstract void ToSql(SqlTextWriter writer);
 }

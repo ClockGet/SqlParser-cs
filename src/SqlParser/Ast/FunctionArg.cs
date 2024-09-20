@@ -21,13 +21,13 @@ public abstract record FunctionArguments : IWriteSql, IElement
 }
 
 public record FunctionArgumentList(
-    DuplicateTreatment? DuplicateTreatment,
-    Sequence<FunctionArg> Args,
-    Sequence<FunctionArgumentClause>? Clauses) : IWriteSql, IElement
+    Sequence<FunctionArg>? Args = null,
+    DuplicateTreatment? DuplicateTreatment = null,
+    Sequence<FunctionArgumentClause>? Clauses = null) : IWriteSql, IElement
 {
     public static FunctionArgumentList Empty()
     {
-        return new FunctionArgumentList(null, null, null);
+        return new FunctionArgumentList();
     }
 
     public void ToSql(SqlTextWriter writer)
@@ -37,7 +37,7 @@ public record FunctionArgumentList(
             writer.WriteSql($"{DuplicateTreatment} ");
         }
 
-        writer.WriteDelimited(Args, ", ");
+        writer.WriteDelimited(Args, Constants.SpacedComma);
 
         if (Clauses.SafeAny())
         {

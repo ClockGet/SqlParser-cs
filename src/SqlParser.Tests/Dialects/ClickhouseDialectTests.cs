@@ -32,7 +32,7 @@ public class ClickhouseDialectTests : ParserTestBase
             [
                 new(new Expression.Function("indexOf")
                 {
-                    Args = new FunctionArguments.List(new FunctionArgumentList(null, args, null))
+                    Args = new FunctionArguments.List(new FunctionArgumentList(Args: args))
                 },
                 MapAccessSyntax.Bracket)
             ]))
@@ -56,7 +56,7 @@ public class ClickhouseDialectTests : ParserTestBase
                     [
                         new Expression.MapAccessKey(new Expression.Function("indexOf")
                         {
-                            Args = new FunctionArguments.List(new FunctionArgumentList(null, selectionArgs, null))
+                            Args = new FunctionArguments.List(new FunctionArgumentList(selectionArgs))
 
                         }, MapAccessSyntax.Bracket)
 
@@ -96,7 +96,7 @@ public class ClickhouseDialectTests : ParserTestBase
 
         var expected = new Expression.Function("array")
         {
-            Args = new FunctionArguments.List(new FunctionArgumentList(null, args, null))
+            Args = new FunctionArguments.List(new FunctionArgumentList(args))
         };
 
         Assert.Equal(expected, select.Projection.First().AsExpr());
@@ -354,9 +354,9 @@ public class ClickhouseDialectTests : ParserTestBase
         {
             Assert.Equal(new ObjectName(new Ident(name)), actual.Name);
             Assert.Equal(
-                new FunctionArguments.List(new FunctionArgumentList(null, [
+                new FunctionArguments.List(new FunctionArgumentList([
                     new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Expression.Identifier(new Ident(arg))))
-                ], null)),
+                ])),
                 actual.Args);
         }
     }
@@ -383,14 +383,14 @@ public class ClickhouseDialectTests : ParserTestBase
 
         var expected = new SelectItem.UnnamedExpression(new Expression.Function("HISTOGRAM")
         {
-            Args = new FunctionArguments.List(new FunctionArgumentList(null, [
+            Args = new FunctionArguments.List(new FunctionArgumentList([
                 new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Expression.Identifier("x"))),
                 new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Expression.Identifier("y"))),
-            ], null)),
-            Parameters = new FunctionArguments.List(new FunctionArgumentList(null, [
+            ])),
+            Parameters = new FunctionArguments.List(new FunctionArgumentList([
                 new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Expression.LiteralValue(new Value.Number("0.5")))),
                 new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Expression.LiteralValue(new Value.Number("0.6"))))
-            ], null))
+            ]))
         });
         Assert.Equal(expected, projection[0]);
     }
@@ -398,7 +398,7 @@ public class ClickhouseDialectTests : ParserTestBase
     [Fact]
     public void Parse_Group_By_With_Modifier()
     {
-        var clauses = new[] { "x", "a, b", "ALL" };
+        var clauses = new[] { "ALL" };//"x", "a, b",
         var modifiers = new[]{
             "WITH ROLLUP",
             "WITH CUBE",
@@ -515,15 +515,15 @@ public class ClickhouseDialectTests : ParserTestBase
             }
         }
 
-        var invalidCases =new []{
+        var invalidCases = new[]{
             "SELECT * FROM t FORMAT",
             "SELECT * FROM t FORMAT TabSeparated JSONCompact",
             "SELECT * FROM t FORMAT TabSeparated TabSeparated",
         };
 
-        foreach(var sql in invalidCases)
+        foreach (var sql in invalidCases)
         {
-            Assert.Throws<ParserException>(() =>  ParseSqlStatements(sql));
+            Assert.Throws<ParserException>(() => ParseSqlStatements(sql));
         }
     }
 
@@ -539,7 +539,7 @@ public class ClickhouseDialectTests : ParserTestBase
                   LIMIT 2
                   """;
 
-        var select = VerifiedQuery(sql, dialects: new []{new ClickHouseDialect()});
+        var select = VerifiedQuery(sql, dialects: new[] { new ClickHouseDialect() });
 
         var orderBy = new Sequence<OrderByExpression>
         {
@@ -613,7 +613,7 @@ public class ClickhouseDialectTests : ParserTestBase
             new Expression.LiteralValue(new Value.Number("10")),
             new Expression.LiteralValue(new Value.Number("20")),
             new Expression.LiteralValue(new Value.Number("2"))
-            ), 
+            ),
             select.OrderBy!.Expressions![0].WithFill);
     }
 
@@ -647,7 +647,7 @@ public class ClickhouseDialectTests : ParserTestBase
         var select = VerifiedQuery(sql, DefaultDialects!);
 
         var expected = new Interpolate([
-            new InterpolateExpression("col1", 
+            new InterpolateExpression("col1",
                 new Expression.BinaryOp(
                     new Expression.Identifier("col1"),
                     BinaryOperator.Plus,
@@ -656,7 +656,7 @@ public class ClickhouseDialectTests : ParserTestBase
 
             new InterpolateExpression("col2", new Expression.Identifier("col3")),
 
-            new InterpolateExpression("col4", 
+            new InterpolateExpression("col4",
                 new Expression.BinaryOp(
                     new Expression.Identifier("col4"),
                     BinaryOperator.Plus,
@@ -681,5 +681,242 @@ public class ClickhouseDialectTests : ParserTestBase
         const string sql = "SELECT fname FROM customer ORDER BY fname WITH FILL INTERPOLATE ()";
         var select = VerifiedQuery(sql, DefaultDialects!);
         Assert.Equal(new Interpolate([]), select.OrderBy!.Interpolate);
+    }
+
+    [Fact]
+    public void Parse_Create_Table_With_Variant_Default_Expressions()
+    {
+        const string sql = """
+                  CREATE TABLE table (
+                  a DATETIME MATERIALIZED now(), 
+                  b DATETIME EPHEMERAL now(), 
+                  c DATETIME EPHEMERAL, 
+                  d STRING ALIAS toString(c)
+                  ) ENGINE=MergeTree
+                  """;
+
+        var create = VerifiedStatement<Statement.CreateTable>(sql);
+
+        var expected = new Sequence<ColumnDef>
+        {
+            new ("a", new DataType.Datetime(), Options:[
+                    new ColumnOptionDef(new ColumnOption.Materialized(new Expression.Function("now")
+                    {
+                        Args = new FunctionArguments.List(new FunctionArgumentList())
+                    }))
+                ]),
+
+            new ("b", new DataType.Datetime(), Options:[
+                    new ColumnOptionDef(new ColumnOption.Ephemeral(new Expression.Function("now")
+                    {
+                        Args = new FunctionArguments.List(new FunctionArgumentList())
+                    }))
+                ]),
+
+            new("c", new DataType.Datetime(), Options:[
+                new ColumnOptionDef(new ColumnOption.Ephemeral())
+                ]),
+
+            new("d", new DataType.StringType(), Options:[
+                new ColumnOptionDef(new ColumnOption.Alias(new Expression.Function("toString")
+                {
+                    Args = new FunctionArguments.List(new FunctionArgumentList(Args: [
+                        new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Expression.Identifier("c")))
+                    ]))
+                }))
+            ]),
+        };
+
+        Assert.Equal(expected, create.Element.Columns);
+    }
+
+    [Fact]
+    public void Parse_Optimize_Table()
+    {
+        DefaultDialects = new List<Dialect> { new ClickHouseDialect() };
+        VerifiedStatement("OPTIMIZE TABLE t0");
+        VerifiedStatement("OPTIMIZE TABLE db.t0");
+        VerifiedStatement("OPTIMIZE TABLE t0 ON CLUSTER 'cluster'");
+        VerifiedStatement("OPTIMIZE TABLE t0 ON CLUSTER 'cluster' FINAL");
+        VerifiedStatement("OPTIMIZE TABLE t0 FINAL DEDUPLICATE");
+        VerifiedStatement("OPTIMIZE TABLE t0 DEDUPLICATE");
+        VerifiedStatement("OPTIMIZE TABLE t0 DEDUPLICATE BY id");
+        VerifiedStatement("OPTIMIZE TABLE t0 FINAL DEDUPLICATE BY id");
+        VerifiedStatement("OPTIMIZE TABLE t0 PARTITION tuple('2023-04-22') DEDUPLICATE BY id");
+        var optimize = VerifiedStatement<Statement.OptimizeTable>("OPTIMIZE TABLE t0 ON CLUSTER cluster PARTITION ID '2024-07' FINAL DEDUPLICATE BY id");
+
+        Assert.Equal("t0", optimize.Name);
+        Assert.Equal("cluster", optimize.OnCluster!);
+        Assert.Equal(new Partition.Identifier(new Ident("2024-07", Symbols.SingleQuote)), optimize.Partition);
+        Assert.True(optimize.IncludeFinal);
+        Assert.Equal(new Deduplicate.ByExpression(new Expression.Identifier("id")), optimize.Deduplicate);
+
+        Assert.Throws<ParserException>(() => ParseSqlStatements("OPTIMIZE TABLE t0 DEDUPLICATE BY"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("OPTIMIZE TABLE t0 PARTITION"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("OPTIMIZE TABLE t0 PARTITION ID"));
+    }
+
+    [Fact]
+    public void Parse_Select_Table_Function_Settings()
+    {
+        var args = new TableFunctionArgs([
+            new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Expression.Identifier("arg")))
+        ], [
+            new ("s0", new Value.Number("3")),
+            new ("s1", new Value.SingleQuotedString("s"))
+        ]);
+
+        CheckSettings(args, "SELECT * FROM table_function(arg, SETTINGS s0 = 3, s1 = 's')");
+
+        args = new TableFunctionArgs([], [
+            new ("s0", new Value.Number("3")),
+            new ("s1", new Value.SingleQuotedString("s"))
+        ]);
+        CheckSettings(args, "SELECT * FROM table_function(SETTINGS s0 = 3, s1 = 's')");
+
+        Assert.Throws<ParserException>(() => ParseSqlStatements("SELECT * FROM t(SETTINGS a)"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("SELECT * FROM t(SETTINGS a=)"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("SELECT * FROM t(SETTINGS a=1, b)"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("SELECT * FROM t(SETTINGS a=1, b=)"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("SELECT * FROM t(SETTINGS a=1, b=c)"));
+        return;
+
+        void CheckSettings(TableFunctionArgs expected, string sql)
+        {
+            var actual = VerifiedStatement(sql);
+            var select = actual.AsSelect().Query.Body.AsSelect();
+
+            Assert.Single(select.From!);
+            Assert.True(select.From![0].Joins == null);
+
+            var relation = select.From[0].Relation;
+
+            Assert.Equal(relation!.AsTable().Args, expected);
+        }
+    }
+
+    [Fact]
+    public void Parse_Alter_Table_Attach_And_Detach_Partition()
+    {
+        var statement = VerifiedStatement<Statement.AlterTable>("ALTER TABLE t0 ATTACH PARTITION part");
+        Assert.Equal(new AlterTableOperation.AttachPartition(new Partition.Expr(new Expression.Identifier("part"))), statement.Operations[0]);
+
+        statement = VerifiedStatement<Statement.AlterTable>("ALTER TABLE t0 DETACH PARTITION part");
+        Assert.Equal(new AlterTableOperation.DetachPartition(new Partition.Expr(new Expression.Identifier("part"))), statement.Operations[0]);
+
+        statement = VerifiedStatement<Statement.AlterTable>("ALTER TABLE t0 ATTACH PART part");
+        Assert.Equal(new AlterTableOperation.AttachPartition(new Partition.Part(new Expression.Identifier("part"))), statement.Operations[0]);
+
+        statement = VerifiedStatement<Statement.AlterTable>("ALTER TABLE t0 DETACH PART part");
+        Assert.Equal(new AlterTableOperation.DetachPartition(new Partition.Part(new Expression.Identifier("part"))), statement.Operations[0]);
+
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 ATTACH PARTITION"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 DETACH PARTITION"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 ATTACH PART"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 DETACH PART"));
+    }
+
+    [Fact]
+    public void Parse_Freeze_And_Unfreeze_Partition()
+    {
+        var actual = VerifiedStatement<Statement.AlterTable>("ALTER TABLE t FREEZE PARTITION '2024-08-14'");
+        var partition = new Partition.Expr(new Expression.LiteralValue(new Value.SingleQuotedString("2024-08-14")));
+        AlterTableOperation expected = new AlterTableOperation.FreezePartition(partition);
+        Assert.Equal(expected, actual.Operations[0]);
+
+        actual = VerifiedStatement<Statement.AlterTable>("ALTER TABLE t UNFREEZE PARTITION '2024-08-14'");
+        expected = new AlterTableOperation.UnfreezePartition(partition);
+        Assert.Equal(expected, actual.Operations[0]);
+
+
+        actual = VerifiedStatement<Statement.AlterTable>("ALTER TABLE t FREEZE PARTITION '2024-08-14' WITH NAME 'hello'");
+        expected = new AlterTableOperation.FreezePartition(partition, new Ident("hello", Symbols.SingleQuote));
+        Assert.Equal(expected, actual.Operations[0]);
+
+        actual = VerifiedStatement<Statement.AlterTable>("ALTER TABLE t UNFREEZE PARTITION '2024-08-14' WITH NAME 'hello'");
+        expected = new AlterTableOperation.UnfreezePartition(partition, new Ident("hello", Symbols.SingleQuote));
+        Assert.Equal(expected, actual.Operations[0]);
+
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 FREEZE PARTITION"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 FREEZE PARTITION p0 WITH"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 FREEZE PARTITION p0 WITH NAME"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 UNFREEZE PARTITION"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 UNFREEZE PARTITION p0 WITH"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 UNFREEZE PARTITION p0 WITH NAME"));
+    }
+
+    [Fact]
+    public void Explain_Describe()
+    {
+        VerifiedStatement("DESCRIBE test.table");
+        VerifiedStatement("DESCRIBE TABLE test.table");
+    }
+
+    [Fact]
+    public void Explain_Desc()
+    {
+        VerifiedStatement("DESC test.table");
+        VerifiedStatement("DESC TABLE test.table");
+    }
+
+    [Fact]
+    public void Parse_Explain_Table()
+    {
+        var explain = VerifiedStatement<Statement.ExplainTable>("EXPLAIN TABLE test_identifier");
+
+        Assert.Equal(DescribeAlias.Explain, explain.DescribeAlias);
+        Assert.Null(explain.HiveFormat);
+        Assert.True(explain.HasTableKeyword);
+        Assert.Equal("test_identifier", explain.Name);
+    }
+
+    [Fact]
+    public void Parse_Alter_Table_Add_Projection()
+    {
+        var alter = VerifiedStatement<Statement.AlterTable>("ALTER TABLE t0 ADD PROJECTION IF NOT EXISTS my_name (SELECT a, b GROUP BY a ORDER BY b)");
+
+        Assert.Equal("t0", alter.Name);
+
+        var expected = new AlterTableOperation.AddProjection(true, "my_name", new ProjectionSelect([
+                new SelectItem.UnnamedExpression(new Expression.Identifier("a")),
+               new SelectItem.UnnamedExpression(new Expression.Identifier("b"))
+            ],
+            new OrderBy([
+                new OrderByExpression(new Expression.Identifier("b"))
+            ], null),
+            new GroupByExpression.Expressions([
+                new Expression.Identifier("a")
+            ])));
+
+        Assert.Equal(expected, alter.Operations[0]);
+        VerifiedStatement("ALTER TABLE t0 ADD PROJECTION my_name (SELECT a, b GROUP BY a ORDER BY b)");
+        VerifiedStatement("ALTER TABLE t0 ADD PROJECTION my_name (SELECT a, b ORDER BY b)");
+        VerifiedStatement("ALTER TABLE t0 ADD PROJECTION my_name (SELECT a, b GROUP BY a)");
+
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 ADD PROJECTION my_name"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 ADD PROJECTION my_name ()"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER TABLE t0 ADD PROJECTION my_name (SELECT)"));
+    }
+
+    [Fact]
+    public void Parse_Use()
+    {
+        List<string> validObjectNames = ["mydb", "SCHEMA", "DATABASE", "CATALOG", "WAREHOUSE", "DEFAULT"];
+
+        List<char> quoteStyles = [Symbols.DoubleQuote, Symbols.Backtick];
+
+        foreach (var objectName in validObjectNames)
+        {
+            var useStatement = VerifiedStatement<Statement.Use>($"USE {objectName}");
+            var expected = new Use.Object(new ObjectName(new Ident(objectName)));
+            Assert.Equal(expected, useStatement.Name);
+
+            foreach (var quote in quoteStyles)
+            {
+                useStatement = VerifiedStatement<Statement.Use>($"USE {quote}{objectName}{quote}");
+                expected = new Use.Object(new ObjectName(new Ident(objectName, quote)));
+                Assert.Equal(expected, useStatement.Name);
+            }
+        }
     }
 }

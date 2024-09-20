@@ -21,10 +21,13 @@ public abstract record Statement : IWriteSql, IElement
     /// <summary>
     /// Alter table statement
     /// </summary>
-    /// <param name="Name">Object name</param>
-    /// <param name="Operations">Table operations</param>
-    public record AlterTable(ObjectName Name, bool IfExists, bool Only, Sequence<AlterTableOperation> Operations,
-        HiveSetLocation? Location) : Statement
+    public record AlterTable(
+        ObjectName Name,
+        bool IfExists,
+        bool Only,
+        Sequence<AlterTableOperation> Operations,
+        HiveSetLocation? Location,
+        Ident? OnCluster = null) : Statement
     {
         public override void ToSql(SqlTextWriter writer)
         {
@@ -39,7 +42,14 @@ public abstract record Statement : IWriteSql, IElement
                 writer.Write("ONLY ");
             }
 
-            writer.WriteSql($"{Name} {Operations.ToSqlDelimited()}");
+            writer.WriteSql($"{Name} ");
+
+            if (OnCluster != null)
+            {
+                writer.WriteSql($"ON CLUSTER {OnCluster} ");
+            }
+
+            writer.WriteDelimited(Operations);
 
             if (Location != null)
             {
@@ -497,7 +507,7 @@ public abstract record Statement : IWriteSql, IElement
     {
         public override void ToSql(SqlTextWriter writer)
         {
-            var ifNotExists = IfNotExists ? "IF NOT EXISTS " : null;
+            var ifNotExists = IfNotExists ? $"{IIfNotExists.IfNotExistsPhrase} " : null;
 
             writer.WriteSql($"CREATE EXTENSION {ifNotExists}{Name}");
 
@@ -595,7 +605,7 @@ public abstract record Statement : IWriteSql, IElement
                 case CreateFunctionBody.AsBeforeOptions b:
                     writer.WriteSql($" AS {b}");
                     break;
-            
+
                 case CreateFunctionBody.Return r:
                     writer.WriteSql($" RETURN {r}");
                     break;
@@ -605,13 +615,13 @@ public abstract record Statement : IWriteSql, IElement
             {
                 writer.WriteSql($" {Using}");
             }
-            if (Options !=null)
+            if (Options != null)
             {
                 writer.WriteSql($" OPTIONS({Options.ToSqlDelimited()})");
             }
             if (FunctionBody is CreateFunctionBody.AsAfterOptions f)
             {
-                writer.WriteSql ($" AS {f}");
+                writer.WriteSql($" AS {f}");
             }
             //writer.WriteSql($"{Parameters}");
         }
@@ -680,7 +690,6 @@ public abstract record Statement : IWriteSql, IElement
             }
         }
     }
-
     public record CreateSecret(
         bool OrReplace,
         bool? Temporary,
@@ -777,6 +786,70 @@ public abstract record Statement : IWriteSql, IElement
         }
     }
     /// <summary>
+    /// CREATE TRIGGER
+    /// </summary>
+    public record CreateTrigger(ObjectName Name) : Statement
+    {
+        public bool OrReplace { get; init; }
+        public bool IsConstraint { get; init; }
+        public TriggerPeriod Period { get; init; }
+        public ObjectName TableName { get; init; }
+        public Sequence<TriggerEvent> Events { get; init; }
+        public ObjectName? ReferencedTableName { get; init; }
+        public Sequence<TriggerReferencing> Referencing { get; init; }
+        public TriggerObject TriggerObject { get; init; }
+        public bool IncludeEach { get; init; }
+        public Expression? Condition { get; init; }
+        public TriggerExecBody ExecBody { get; init; }
+        public ConstraintCharacteristics? Characteristics { get; init; }
+
+        public override void ToSql(SqlTextWriter writer)
+        {
+            var orReplace = OrReplace ? "OR REPLACE " : string.Empty;
+            var isConstraint = IsConstraint ? " CONSTRAINT " : string.Empty;
+            writer.WriteSql($"CREATE {orReplace}{isConstraint}TRIGGER {Name} {Period}");
+
+            if (Events.SafeAny())
+            {
+                writer.Write(" ");
+                writer.WriteDelimited(Events, " OR ");
+            }
+
+            writer.WriteSql($" ON {TableName}");
+
+            if (ReferencedTableName != null)
+            {
+                writer.WriteSql($" FROM {ReferencedTableName}");
+            }
+
+            if (Characteristics != null)
+            {
+                writer.WriteSql($" {Characteristics}");
+            }
+
+            if (Referencing.SafeAny())
+            {
+                writer.WriteSql($" REFERENCING {Referencing.ToSqlDelimited(" ")}");
+            }
+
+            if (IncludeEach)
+            {
+                writer.WriteSql($" FOR EACH {TriggerObject}");
+            }
+            else
+            {
+                writer.WriteSql($" FOR {TriggerObject}");
+            }
+
+            if (Condition != null)
+            {
+                writer.WriteSql($" WHEN {Condition}");
+            }
+
+            writer.WriteSql($" EXECUTE {ExecBody}");
+        }
+    }
+    /// <summary>
     /// Create View statement
     /// </summary>
     /// <param name="Name">Object name</param>
@@ -799,7 +872,7 @@ public abstract record Statement : IWriteSql, IElement
             var orReplace = OrReplace ? "OR REPLACE " : null;
             var materialized = Materialized ? "MATERIALIZED " : null;
             var temporary = Temporary ? "TEMPORARY " : null;
-            var ifNotExists = IfNotExists ? "IF NOT EXISTS " : null;
+            var ifNotExists = IfNotExists ? $"{IIfNotExists.IfNotExistsPhrase} " : null;
             var to = To != null ? $" TO {To.ToSql()}" : null;
 
             writer.WriteSql($"CREATE {orReplace}{materialized}{temporary}VIEW {ifNotExists}{Name}{to}");
@@ -1071,7 +1144,7 @@ public abstract record Statement : IWriteSql, IElement
 
             if (DeleteOperation.Tables is { Count: > 0 })
             {
-                writer.WriteDelimited(DeleteOperation.Tables, ", ");
+                writer.WriteDelimited(DeleteOperation.Tables, Constants.SpacedComma);
             }
 
             writer.WriteSql($"{DeleteOperation.From}");
@@ -1138,6 +1211,21 @@ public abstract record Statement : IWriteSql, IElement
             {
                 writer.WriteSql($" FROM {StorageSpecifier}");
             }
+        }
+    }
+
+    public record DropTrigger(bool IfExists, ObjectName TriggerName, ObjectName TableName, ReferentialAction Option) : Statement
+    {
+        public override void ToSql(SqlTextWriter writer)
+        {
+            writer.Write("DROP TRIGGER");
+
+            if (IfExists)
+            {
+                writer.Write(" IF EXISTS");
+            }
+
+            writer.WriteSql($" {TriggerName} ON {TableName}");
         }
     }
     /// <summary>
@@ -1245,7 +1333,7 @@ public abstract record Statement : IWriteSql, IElement
     /// <param name="IfExists">True if exists</param>
     /// <param name="FuncDesc">Drop function descriptions</param>
     /// <param name="Option">Referential actions</param>
-    public record DropFunction(bool IfExists, Sequence<DropFunctionDesc> FuncDesc, ReferentialAction Option) : Statement
+    public record DropFunction(bool IfExists, Sequence<FunctionDesc> FuncDesc, ReferentialAction Option) : Statement
     {
         public override void ToSql(SqlTextWriter writer)
         {
@@ -1263,7 +1351,7 @@ public abstract record Statement : IWriteSql, IElement
     /// </summary>
     /// <param name="Name">Object name</param>
     /// <param name="Args">Operate function arguments</param>
-    public record DropFunctionDesc(ObjectName Name, Sequence<OperateFunctionArg>? Args = null) : Statement
+    public record FunctionDesc(ObjectName Name, Sequence<OperateFunctionArg>? Args = null) : Statement
     {
         public override void ToSql(SqlTextWriter writer)
         {
@@ -1275,7 +1363,7 @@ public abstract record Statement : IWriteSql, IElement
         }
     }
 
-    public record DropProcedure(bool IfExists, Sequence<DropFunctionDesc> ProcDescription, ReferentialAction? Option) : Statement
+    public record DropProcedure(bool IfExists, Sequence<FunctionDesc> ProcDescription, ReferentialAction? Option) : Statement
     {
         public override void ToSql(SqlTextWriter writer)
         {
@@ -1333,16 +1421,29 @@ public abstract record Statement : IWriteSql, IElement
     /// </summary>
     /// <param name="DescribeAlias">Query used the DESCRIBE alias for explain</param>
     /// <param name="Name">Table name</param>
-    public record ExplainTable(DescribeAlias DescribeAlias, ObjectName Name, HiveDescribeFormat? HiveFormat) : Statement
+    /// <param name="HiveFormat">Hive format</param>
+    /// <param name="HasTableKeyword">True if statement has Table keyword; otherwise false</param>
+    public record ExplainTable(
+        DescribeAlias DescribeAlias,
+        ObjectName Name,
+        HiveDescribeFormat? HiveFormat,
+        bool HasTableKeyword = false) : Statement
     {
         public override void ToSql(SqlTextWriter writer)
         {
             // writer.Write(DescribeAlias ? "DESCRIBE " : "EXPLAIN ");
             writer.WriteSql($"{DescribeAlias} ");
+
             if (HiveFormat != null)
             {
                 writer.WriteSql($"{HiveFormat} ");
             }
+
+            if (HasTableKeyword)
+            {
+                writer.Write("TABLE ");
+            }
+
             writer.Write(Name);
         }
     }
@@ -1572,7 +1673,41 @@ public abstract record Statement : IWriteSql, IElement
             }
         }
     }
+    /// <summary>
+    /// OPTIMIZE TABLE [db.]name [ON CLUSTER cluster] [PARTITION partition | PARTITION ID 'partition_id'] [FINAL] [DEDUPLICATE [BY expression]]
+    /// </summary>
+    public record OptimizeTable(
+        ObjectName Name,
+        Ident? OnCluster = null,
+        Partition? Partition = null,
+        bool IncludeFinal = false,
+        Deduplicate? Deduplicate = null) : Statement
+    {
+        public override void ToSql(SqlTextWriter writer)
+        {
+            writer.WriteSql($"OPTIMIZE TABLE {Name}");
 
+            if (OnCluster != null)
+            {
+                writer.WriteSql($" ON CLUSTER {OnCluster}");
+            }
+
+            if (Partition != null)
+            {
+                writer.WriteSql($" {Partition}");
+            }
+
+            if (IncludeFinal)
+            {
+                writer.Write(" FINAL");
+            }
+
+            if (Deduplicate != null)
+            {
+                writer.WriteSql($" {Deduplicate}");
+            }
+        }
+    }
     public record Pragma(ObjectName Name, Value? Value, bool IsEqual) : Statement
     {
         public override void ToSql(SqlTextWriter writer)
@@ -2116,11 +2251,11 @@ public abstract record Statement : IWriteSql, IElement
     /// Note: This is a MySQL-specific statement.
     /// </summary>
     /// <param name="Name">Name identifier</param>
-    public record Use(Ident Name) : Statement
+    public record Use(Ast.Use Name) : Statement
     {
         public override void ToSql(SqlTextWriter writer)
         {
-            writer.WriteSql($"USE {Name}");
+            writer.WriteSql($"{Name}");
         }
     }
 

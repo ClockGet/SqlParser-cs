@@ -227,18 +227,24 @@ public abstract record Expression : IWriteSql, IElement
     /// </summary>
     /// <param name="Expression">Expression</param>
     /// <param name="Field">Date time field</param>
-    public record Ceil(Expression Expression, DateTimeField Field) : Expression
+    public record Ceil(Expression Expression, CeilFloorKind Field) : Expression
     {
         public override void ToSql(SqlTextWriter writer)
         {
-            // ReSharper disable once ConvertIfStatementToConditionalTernaryExpression
-            if (Field is DateTimeField.NoDateTime)
+            switch (Field)
             {
-                writer.WriteSql($"CEIL({Expression})");
-            }
-            else
-            {
-                writer.WriteSql($"CEIL({Expression} TO {Field})");
+                // ReSharper disable once ConvertIfStatementToConditionalTernaryExpression
+                case CeilFloorKind.DateTimeFieldKind { Field: DateTimeField.NoDateTime }:
+                    writer.WriteSql($"CEIL({Expression})");
+                    break;
+             
+                case CeilFloorKind.DateTimeFieldKind dt:
+                    writer.WriteSql($"CEIL({Expression} TO {dt.Field})");
+                    break;
+               
+                case CeilFloorKind.Scale s:
+                    writer.WriteSql($"CEIL({Expression}, {s.Field})");
+                    break;
             }
         }
     }
@@ -352,7 +358,7 @@ public abstract record Expression : IWriteSql, IElement
             {
                 if (i > 0)
                 {
-                    writer.Write(", ");
+                    writer.WriteCommaSpaced();
                 }
 
                 // ReSharper disable once ConvertIfStatementToConditionalTernaryExpression
@@ -406,11 +412,18 @@ public abstract record Expression : IWriteSql, IElement
     /// </summary>
     /// <param name="Expression">Expression</param>
     /// <param name="Field">Date time field</param>
-    public record Extract(Expression Expression, DateTimeField Field) : Expression
+    public record Extract(Expression Expression, DateTimeField Field, ExtractSyntax Syntax) : Expression
     {
         public override void ToSql(SqlTextWriter writer)
         {
-            writer.WriteSql($"EXTRACT({Field} FROM {Expression})");
+            if (Syntax == ExtractSyntax.From)
+            {
+                writer.WriteSql($"EXTRACT({Field} FROM {Expression})");
+            }
+            else
+            {
+                writer.WriteSql($"EXTRACT({Field}, {Expression})");
+            }
         }
     }
     /// <summary>
@@ -423,18 +436,24 @@ public abstract record Expression : IWriteSql, IElement
     /// </summary>
     /// <param name="Expression">Expression</param>
     /// <param name="Field">Date time field</param>
-    public record Floor(Expression Expression, DateTimeField Field) : Expression
+    public record Floor(Expression Expression, CeilFloorKind Field) : Expression
     {
         public override void ToSql(SqlTextWriter writer)
         {
-            // ReSharper disable once ConvertIfStatementToConditionalTernaryExpression
-            if (Field is DateTimeField.NoDateTime)
+            switch (Field)
             {
-                writer.WriteSql($"FLOOR({Expression})");
-            }
-            else
-            {
-                writer.WriteSql($"FLOOR({Expression} TO {Field})");
+                // ReSharper disable once ConvertIfStatementToConditionalTernaryExpression
+                case CeilFloorKind.DateTimeFieldKind { Field: DateTimeField.NoDateTime }:
+                    writer.WriteSql($"FLOOR({Expression})");
+                    break;
+
+                case CeilFloorKind.DateTimeFieldKind dt:
+                    writer.WriteSql($"FLOOR({Expression} TO {dt.Field})");
+                    break;
+
+                case CeilFloorKind.Scale s:
+                    writer.WriteSql($"FLOOR({Expression}, {s.Field})");
+                    break;
             }
         }
     }
@@ -518,7 +537,7 @@ public abstract record Expression : IWriteSql, IElement
             {
                 if (i > 0)
                 {
-                    writer.Write(", ");
+                    writer.WriteCommaSpaced();
                 }
 
                 writer.WriteSql($"({Expressions[i]})");
@@ -863,6 +882,14 @@ public abstract record Expression : IWriteSql, IElement
             Value.ToSql(writer);
         }
     }
+
+    public record Map(Ast.Map MapExpression) : Expression
+    {
+        public override void ToSql(SqlTextWriter writer)
+        {
+           writer.WriteSql($"{MapExpression}");
+        }
+    }
     /// Access a map-like object by field
     /// 
     /// Note that depending on the dialect, struct like accesses may be
@@ -1078,7 +1105,7 @@ public abstract record Expression : IWriteSql, IElement
             {
                 if (i > 0)
                 {
-                    writer.Write(", ");
+                    writer.WriteCommaSpaced();
                 }
 
                 // ReSharper disable once ConvertIfStatementToConditionalTernaryExpression

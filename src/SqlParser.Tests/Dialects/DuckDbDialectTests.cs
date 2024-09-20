@@ -234,7 +234,7 @@ public class DuckDbDialectTests : ParserTestBase
 
         Assert.Equal(new Expression.Function("FUN")
         {
-            Args =new FunctionArguments.List(new FunctionArgumentList(null, args, null))
+            Args =new FunctionArguments.List(new FunctionArgumentList(args))
         }, function);
     }
 
@@ -356,5 +356,71 @@ public class DuckDbDialectTests : ParserTestBase
         ]));
 
         Assert.Equal(expected, create);
+    }
+
+
+    [Fact]
+    public void Test_Struct()
+    {
+        var structType = new DataType.Struct([
+            new (new DataType.Varchar(), "v"),
+            new (new DataType.Integer(), "i")
+        ], StructBracketKind.Parentheses);
+
+        var create = (Statement.CreateTable)VerifiedStatement("CREATE TABLE t1 (s STRUCT(v VARCHAR, i INTEGER))");
+
+        Assert.Equal([new ColumnDef("s", structType)], create.Element.Columns);
+
+        structType = new DataType.Struct([
+            new (new DataType.Varchar(), "v"),
+            new (new DataType.Struct([
+                new(new DataType.Integer(), "a1"),
+                new(new DataType.Varchar(), "a2")
+            ], StructBracketKind.Parentheses), "s")
+        ], StructBracketKind.Parentheses);
+
+
+        create = (Statement.CreateTable)VerifiedStatement("CREATE TABLE t1 (s STRUCT(v VARCHAR, s STRUCT(a1 INTEGER, a2 VARCHAR))[])");
+
+        Assert.Equal([new ColumnDef("s", new DataType.Array(new ArrayElementTypeDef.SquareBracket(structType)))], create.Element.Columns);
+
+        Assert.Throws<ParserException>(() => ParseSqlStatements("CREATE TABLE t1 (s STRUCT(v VARCHAR, i INTEGER)))"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("CREATE TABLE t1 (s STRUCT(v VARCHAR, i INTEGER>)"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("CREATE TABLE t1 (s STRUCT<v VARCHAR, i INTEGER>)"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("CREATE TABLE t1 (s STRUCT v VARCHAR, i INTEGER )"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("CREATE TABLE t1 (s STRUCT VARCHAR, i INTEGER )"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("CREATE TABLE t1 (s STRUCT (VARCHAR, INTEGER))"));
+    }
+
+    [Fact]
+    public void Parse_Use()
+    {
+        List<string> validObjectNames = ["mydb", "SCHEMA", "DATABASE", "CATALOG", "WAREHOUSE", "DEFAULT"];
+
+        List<char> quoteStyles = [Symbols.DoubleQuote, Symbols.SingleQuote];
+
+        foreach (var objectName in validObjectNames)
+        {
+            var useStatement = VerifiedStatement<Statement.Use>($"USE {objectName}");
+            var expected = new Use.Object(new ObjectName(new Ident(objectName)));
+            Assert.Equal(expected, useStatement.Name);
+
+            foreach (var quote in quoteStyles)
+            {
+                useStatement = VerifiedStatement<Statement.Use>($"USE {quote}{objectName}{quote}");
+                expected = new Use.Object(new ObjectName(new Ident(objectName, quote)));
+                Assert.Equal(expected, useStatement.Name);
+            }
+        }
+
+        foreach (var quote in quoteStyles)
+        {
+            Assert.Equal(new Statement.Use(new Use.Object(new ObjectName([
+                new Ident("CATALOG", quote),
+                new Ident("my_schema", quote)
+            ]))), VerifiedStatement($"USE {quote}CATALOG{quote}.{quote}my_schema{quote}"));
+        }
+
+        Assert.Equal(new Statement.Use(new Use.Object(new ObjectName(["mydb", "my_schema"]))), VerifiedStatement("USE mydb.my_schema"));
     }
 }

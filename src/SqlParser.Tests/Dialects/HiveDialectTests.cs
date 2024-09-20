@@ -283,7 +283,9 @@ public class HiveDialectTests : ParserTestBase
     [Fact]
     public void Parse_Describe()
     {
-        VerifiedStatement("DESCRIBE namespace.`table`", [new HiveDialect(), new GenericDialect()]);
+        VerifiedStatement("DESCRIBE namespace.`table`");
+        VerifiedStatement("DESCRIBE namespace.table");
+        VerifiedStatement("DESCRIBE table");
     }
 
     [Fact]
@@ -324,5 +326,59 @@ public class HiveDialectTests : ParserTestBase
     public void Explain_Describe_Extended()
     {
         VerifiedStatement("DESCRIBE EXTENDED test.table");
+    }
+
+    [Fact]
+    public void Parse_Use()
+    {
+        List<string> validObjectNames = ["mydb", "SCHEMA", "DATABASE", "CATALOG", "WAREHOUSE"];
+
+        List<char> quoteStyles = [Symbols.Backtick, Symbols.DoubleQuote, Symbols.Backtick];
+
+        foreach (var objectName in validObjectNames)
+        {
+            var useStatement = VerifiedStatement<Statement.Use>($"USE {objectName}");
+            var expected = new Use.Object(new ObjectName(new Ident(objectName)));
+            Assert.Equal(expected, useStatement.Name);
+
+            foreach (var quote in quoteStyles)
+            {
+                useStatement = VerifiedStatement<Statement.Use>($"USE {quote}{objectName}{quote}");
+                expected = new Use.Object(new ObjectName(new Ident(objectName, quote)));
+                Assert.Equal(expected, useStatement.Name);
+            }
+        }
+
+        Assert.Equal(new Statement.Use(new Use.Default()), VerifiedStatement("USE DEFAULT"));
+    }
+
+    [Fact]
+    public void Create_Table_With_Clustered_By()
+    {
+        const string sql = """
+                           CREATE TABLE db.table_name (a INT, b STRING) 
+                           PARTITIONED BY (a INT, b STRING) 
+                           CLUSTERED BY (a, b) SORTED BY (a ASC, b DESC) 
+                           INTO 4 BUCKETS
+                           """;
+
+        var create = VerifiedStatement<Statement.CreateTable>(sql);
+        var expected = new ClusteredBy(
+            [
+                "a", "b"
+            ], 
+            [
+                new OrderByExpression(new Identifier("a"), true),
+                new OrderByExpression(new Identifier("b"), false)
+            ], new Value.Number("4"));
+
+        Assert.Equal(expected, create.Element.ClusteredBy);
+
+        VerifiedStatement("CREATE TABLE db.table_name (a INT, b STRING) PARTITIONED BY (a INT, b STRING) CLUSTERED BY (a, b) INTO 4 BUCKETS");
+
+        Assert.Throws<ParserException>(() => ParseSqlStatements("CREATE TABLE db.table_name (a INT, b STRING) PARTITIONED BY (a INT, b STRING) CLUSTERED BY (a, b)"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("CREATE TABLE db.table_name (a INT, b STRING) PARTITIONED BY (a INT, b STRING) CLUSTERED BY () INTO 4 BUCKETS"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("CREATE TABLE db.table_name (a INT, b STRING) PARTITIONED BY (a INT, b STRING) CLUSTERED BY (a, b) SORTED BY INTO 4 BUCKETS"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("CREATE TABLE db.table_name (a INT, b STRING) PARTITIONED BY (a INT, b STRING) CLUSTERED BY (a, b) SORTED BY (a ASC, b DESC) INTO"));
     }
 }
