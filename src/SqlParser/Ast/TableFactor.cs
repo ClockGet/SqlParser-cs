@@ -136,7 +136,7 @@ public abstract record TableFactor : IWriteSql, IElement
         /// This field's value is `Some(v)`, where `v` is a (possibly empty)
         /// vector of arguments, in the case of a table-valued function call,
         /// whereas it's `None` in the case of a regular table name.
-        [Visit(2)] public Sequence<FunctionArg>? Args { get; init; }
+        [Visit(2)] public TableFunctionArgs? Args { get; init; }
         /// MSSQL-specific `WITH (...)` hints such as NOLOCK.
         [Visit(3)] public Sequence<Expression>? WithHints { get; init; }
 
@@ -148,7 +148,20 @@ public abstract record TableFactor : IWriteSql, IElement
 
             if (Args != null)
             {
-                writer.WriteSql($"({Args})");
+                writer.Write("(");
+
+                writer.WriteDelimited(Args.Arguments, Constants.SpacedComma);
+
+                if (Args.Settings.SafeAny())
+                {
+                    if (Args.Arguments.SafeAny())
+                    {
+                        writer.WriteCommaSpaced();
+                    }
+
+                    writer.WriteSql($"SETTINGS {Args.Settings.ToSqlDelimited()}");
+                }
+                writer.Write(")");
             }
 
             if (WithOrdinality)

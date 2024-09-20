@@ -1508,13 +1508,13 @@ public class PostgresDialectTests : ParserTestBase
                         "_pg_expandarray"
                 ]))
             {
-                Args = new FunctionArguments.List(new FunctionArgumentList(null, [
+                Args = new FunctionArguments.List(new FunctionArgumentList([
                     new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Expression.Array(new ArrayExpression(new[]
                         {
                             new LiteralValue(new Value.SingleQuotedString("i")),
                             new LiteralValue(new Value.SingleQuotedString("i"))
                         }, true))))
-                ], null))
+                ]))
             }), "n")
         );
 
@@ -1833,7 +1833,7 @@ public class PostgresDialectTests : ParserTestBase
     public void Parse_Drop_Function()
     {
         var drop = VerifiedStatement<Statement.DropFunction>("DROP FUNCTION IF EXISTS test_func");
-        var expected = new Statement.DropFunction(true, new Statement.DropFunctionDesc[]
+        var expected = new Statement.DropFunction(true, new Statement.FunctionDesc[]
             {
                     new("test_func")
             },
@@ -1842,7 +1842,7 @@ public class PostgresDialectTests : ParserTestBase
 
 
         drop = VerifiedStatement<Statement.DropFunction>("DROP FUNCTION IF EXISTS test_func(a INTEGER, IN b INTEGER = 1)");
-        expected = new Statement.DropFunction(true, new Statement.DropFunctionDesc[]
+        expected = new Statement.DropFunction(true, new Statement.FunctionDesc[]
             {
                     new("test_func")
                     {
@@ -1862,7 +1862,7 @@ public class PostgresDialectTests : ParserTestBase
 
 
         drop = VerifiedStatement<Statement.DropFunction>("DROP FUNCTION IF EXISTS test_func1(a INTEGER, IN b INTEGER = 1), test_func2(a VARCHAR, IN b INTEGER = 1)");
-        expected = new Statement.DropFunction(true, new Statement.DropFunctionDesc[]
+        expected = new Statement.DropFunction(true, new Statement.FunctionDesc[]
             {
                     new("test_func1")
                     {
@@ -2269,9 +2269,9 @@ public class PostgresDialectTests : ParserTestBase
         expected = new Subscript.Slice(
             new BinaryOp(new Function("array_length")
             {
-                Args = new FunctionArguments.List(new FunctionArgumentList(null,
-                        [new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Identifier("arr")))],
-                        null))
+                Args = new FunctionArguments.List(new FunctionArgumentList(
+                        [new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Identifier("arr")))]
+                        ))
             },
                 BinaryOperator.Minus,
                 new LiteralValue(new Value.Number("3"))),
@@ -2279,9 +2279,8 @@ public class PostgresDialectTests : ParserTestBase
             new BinaryOp(new Function("array_length")
             {
                 Args = new FunctionArguments.List(new FunctionArgumentList(
-                        null,
-                        [new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Identifier("arr")))],
-                        null))
+                        [new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Identifier("arr")))]
+                        ))
             },
                 BinaryOperator.Minus,
                 new LiteralValue(new Value.Number("1"))),
@@ -2312,13 +2311,11 @@ public class PostgresDialectTests : ParserTestBase
                 new Function("make_array")
                 {
                     Args = new FunctionArguments.List(new FunctionArgumentList(
-                        null,
                         [
                             new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new LiteralValue(new Value.Number("1")))),
                                 new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new LiteralValue(new Value.Number("2")))),
                                 new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new LiteralValue(new Value.Number("3"))))
-                        ],
-                        null))
+                        ]))
                 },
                 new Subscript.Slice(new LiteralValue(new Value.Number("1")), new LiteralValue(new Value.Number("2")), null)),
             new Subscript.Index(new LiteralValue(new Value.Number("2"))));
@@ -2487,9 +2484,9 @@ public class PostgresDialectTests : ParserTestBase
         var partition = (Function)create.PartitionBy!;
 
         Assert.Equal("RANGE", partition.Name);
-        Assert.Equal(new FunctionArguments.List(new FunctionArgumentList(null, [
+        Assert.Equal(new FunctionArguments.List(new FunctionArgumentList([
                 new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Identifier("a")))
-            ], null))
+            ]))
             , partition.Args);
     }
 
@@ -2504,6 +2501,100 @@ public class PostgresDialectTests : ParserTestBase
         {
             new (new LiteralValue(new Value.Number("1")))
         }, create.Query!.Body.AsSelect().Projection);
+    }
+
+    [Fact]
+    public void Test_Escaped_String_Literal()
+    {
+        var expr = (LiteralValue)VerifiedExpr("E'\\n'");
+        var value = (Value.EscapedStringLiteral)expr.Value;
+
+        Assert.Equal("\n", value.Value);
+    }
+
+    [Fact]
+    public void Test_Unicode_String_Literal()
+    {
+        var pairs = new List<(string Sql, string Expected)>
+        {
+            new ("U&'\\0441\\043B\\043E\\043D'", "слон"),
+            new ("U&'\\+01F418'",  """🐘"""),
+            new ("U&'\\\\'", "\\"),
+            new ("U&''''", "'"),
+        };
+
+        foreach (var pair in pairs)
+        {
+            var expr = (LiteralValue)VerifiedExpr(pair.Sql);
+            var value = (Value.UnicodeStringLiteral)expr.Value;
+
+            Assert.Equal(pair.Expected, value.Value);
+        }
+    }
+
+    [Fact]
+    public void Arrow_Precedence()
+    {
+        CheckPrecedence("SELECT foo -> 'bar' = 'spam'", BinaryOperator.Arrow);
+        CheckPrecedence("SELECT foo ->> 'bar' = 'spam'", BinaryOperator.LongArrow);
+
+        return;
+
+        void CheckPrecedence(string sql, BinaryOperator @operator)
+        {
+            var query = VerifiedStatement(sql);
+
+            var select = query.AsQuery()!.Body.AsSelectExpression();
+            var expected = new Sequence<SelectItem>
+            {
+                new SelectItem.UnnamedExpression(new BinaryOp(
+                    new BinaryOp(
+                        new Identifier("foo"),
+                        @operator,
+                        new LiteralValue(new Value.SingleQuotedString("bar"))
+                        ),
+                    BinaryOperator.Eq,
+                    new LiteralValue(new Value.SingleQuotedString("spam"))
+                ))
+            };
+            Assert.Equal(expected, select.Select.Projection);
+        }
+    }
+
+    [Fact]
+    public void Arrow_Cast_Precedence()
+    {
+        var query = VerifiedStatement("SELECT foo -> 'bar'::TEXT");
+
+        var select = query.AsQuery()!.Body.AsSelectExpression();
+        var expected = new Sequence<SelectItem>
+        {
+            new SelectItem.UnnamedExpression(new BinaryOp(
+              new Identifier("foo"),
+              BinaryOperator.Arrow,
+              new Cast(new LiteralValue(new Value.SingleQuotedString("bar")), new DataType.Text(), CastKind.DoubleColon)
+            ))
+        };
+
+        Assert.Equal(expected, select.Select.Projection);
+    }
+
+    [Fact]
+    public void Parse_Create_Simple_Before_Insert_Trigger()
+    {
+        const string sql = "CREATE TRIGGER check_insert BEFORE INSERT ON accounts FOR EACH ROW EXECUTE FUNCTION check_account_insert";
+
+        var expected = new Statement.CreateTrigger("check_insert")
+        {
+            Period = TriggerPeriod.Before,
+            Events = [new TriggerEvent.Insert()],
+            TableName = "accounts",
+            TriggerObject = TriggerObject.Row,
+            ExecBody = new TriggerExecBody(TriggerExecBodyType.Function, new Statement.FunctionDesc("check_account_insert")),
+            IncludeEach = true
+        };
+
+        Assert.Equal(expected, VerifiedStatement(sql, new []{new PostgreSqlDialect()}));
     }
 }
 

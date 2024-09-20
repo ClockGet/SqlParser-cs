@@ -42,120 +42,7 @@ public partial class Parser
     /// <returns>Precedence value</returns>
     public short GetNextPrecedence()
     {
-        var dialectPrecedence = _dialect.GetNextPrecedence(this);
-        if (dialectPrecedence != null)
-        {
-            return dialectPrecedence.Value;
-        }
-
-        var token = PeekToken();
-
-        // use https://www.postgresql.org/docs/7.0/operators.htm#AEN2026 as a reference
-        return token switch
-        {
-            Word { Keyword: Keyword.OR } => OrPrecedence,
-            Word { Keyword: Keyword.AND } => AndPrecedence,
-            Word { Keyword: Keyword.XOR } => XOrPrecedence,
-            Word { Keyword: Keyword.AT } => GetAtPrecedence(),
-            Word { Keyword: Keyword.NOT } => GetNotPrecedence(),
-            Word { Keyword: Keyword.IS } => IsPrecedence,
-            Word { Keyword: Keyword.IN or Keyword.BETWEEN or Keyword.OPERATOR } => BetweenPrecedence,
-            Word { Keyword: Keyword.LIKE or Keyword.ILIKE or Keyword.SIMILAR or Keyword.REGEXP or Keyword.RLIKE } =>
-                LikePrecedence,
-            Word { Keyword: Keyword.DIV } => MulDivModOpPrecedence,
-
-            Equal
-                or LessThan
-                or LessThanOrEqual
-                or NotEqual
-                or GreaterThan
-                or GreaterThanOrEqual
-                or DoubleEqual
-                or Tilde
-                or TildeAsterisk
-                or ExclamationMarkTilde
-                or ExclamationMarkTildeAsterisk
-                or DoubleTilde
-                or DoubleTildeAsterisk
-                or ExclamationMarkDoubleTilde
-                or ExclamationMarkDoubleTildeAsterisk
-                or Spaceship
-                => BetweenPrecedence,
-
-            Pipe => PipePrecedence,
-
-            Caret
-                or Hash
-                or ShiftRight
-                or ShiftLeft
-                => CaretPrecedence,
-
-            Ampersand => AmpersandPrecedence,
-            Plus or Minus => PlusMinusPrecedence,
-
-            Multiply
-                or Divide
-                or DuckIntDiv
-                or Modulo
-                or StringConcat
-                => MulDivModOpPrecedence,
-
-            DoubleColon
-                //or Colon
-                or ExclamationMark
-                or LeftBracket
-                or Overlap
-                or CaretAt
-                => ArrowPrecedence,
-
-            Colon when _dialect is SnowflakeDialect => ArrowPrecedence,
-
-            Arrow
-            or LongArrow
-                or HashArrow
-                or HashLongArrow
-                or AtArrow
-                or ArrowAt
-                or HashMinus
-                or AtQuestion
-                or AtAt
-                or Question
-                or QuestionAnd
-                or QuestionPipe
-                or CustomBinaryOperator
-                => PgOtherPrecedence,
-
-            _ => 0
-        };
-
-        short GetAtPrecedence()
-        {
-            if (PeekNthToken(1) is Word { Keyword: Keyword.TIME } &&
-                PeekNthToken(2) is Word { Keyword: Keyword.ZONE })
-            {
-                return AtTimeZonePrecedence;
-            }
-
-            return 0;
-        }
-
-        // The precedence of NOT varies depending on keyword that
-        // follows it. If it is followed by IN, BETWEEN, or LIKE,
-        // it takes on the precedence of those tokens. Otherwise, it
-        // is not an infix operator, and therefore has zero
-        // precedence.
-        short GetNotPrecedence()
-        {
-            return PeekNthToken(1) switch
-            {
-                Word { Keyword: Keyword.IN or Keyword.BETWEEN } => BetweenPrecedence,
-                Word
-                {
-                    Keyword: Keyword.LIKE or Keyword.ILIKE or Keyword.SIMILAR or Keyword.REGEXP or Keyword.RLIKE
-                } => LikePrecedence,
-                _ => 0
-            };
-        }
+        return _dialect.GetNextPrecedenceDefault(this);
     }
 
     /// <summary>
@@ -405,6 +292,22 @@ public partial class Parser
         return Keyword.undefined;
     }
 
+    public Sequence<T> ParseKeywordSeparated<T>(Keyword keyword, Func<T> action)
+    {
+        Sequence<T> values = [];
+
+        while (true)
+        {
+            var value = action();
+            values.Add(value);
+            if (!ParseKeyword(keyword))
+            {
+                break;
+            }
+        }
+
+        return values;
+    }
     /// <summary>
     /// Expects the next keyword to be of a specific type.  If the keyword
     /// is not found, an exception is thrown. This makes it possible
@@ -808,7 +711,11 @@ public partial class Parser
                         var rlike = ParseKeyword(Keyword.RLIKE);
                         if (regexp || rlike)
                         {
-                            return new RLike(negated, expr, ParseSubExpression(LikePrecedence), regexp);
+                            return new RLike(
+                                negated, 
+                                expr, 
+                                ParseSubExpression(_dialect.GetPrecedence(Precedence.Like)), 
+                                regexp);
                         }
 
                         if (ParseKeyword(Keyword.IN))
@@ -823,17 +730,27 @@ public partial class Parser
 
                         if (ParseKeyword(Keyword.LIKE))
                         {
-                            return new Like(expr, negated, ParseSubExpression(LikePrecedence), ParseEscapeChar());
+                            return new Like(expr, negated, 
+                                ParseSubExpression(_dialect.GetPrecedence(Precedence.Like)), 
+                                ParseEscapeChar());
                         }
 
                         if (ParseKeyword(Keyword.ILIKE))
                         {
-                            return new ILike(expr, negated, ParseSubExpression(LikePrecedence), ParseEscapeChar());
+                            return new ILike(
+                                expr, 
+                                negated, 
+                                ParseSubExpression(_dialect.GetPrecedence(Precedence.Like)), 
+                                ParseEscapeChar());
                         }
 
                         if (ParseKeywordSequence(Keyword.SIMILAR, Keyword.TO))
                         {
-                            return new SimilarTo(expr, negated, ParseSubExpression(LikePrecedence), ParseEscapeChar());
+                            return new SimilarTo(
+                                expr, 
+                                negated, 
+                                ParseSubExpression(_dialect.GetPrecedence(Precedence.Like)),
+                                ParseEscapeChar());
                         }
 
                         throw Expected("IN or BETWEEN after NOT", PeekToken());
@@ -968,6 +885,7 @@ public partial class Parser
             SingleQuotedString s => s.Value,
             DoubleQuotedString s => s.Value,
             EscapedStringLiteral s when _dialect is PostgreSqlDialect or GenericDialect => s.Value,
+            UnicodeStringLiteral s => s.Value,
             _ => throw Expected("literal string", token)
         };
     }
@@ -1014,10 +932,6 @@ public partial class Parser
     /// Parse a comma-separated list of 0+ items accepted by `F`
     /// `end_token` - expected end token for the closure (e.g. [Token::RParen], [Token::RBrace] ...)
     /// </summary>
-    /// <typeparam name="T"></typeparam>
-    /// <param name="action"></param>
-    /// <param name="endToken"></param>
-    /// <returns></returns>
     public Sequence<T> ParseCommaSeparated0<T>(Func<T> action, Type endTokenType)
     {
         var next = PeekToken();
@@ -1048,32 +962,44 @@ public partial class Parser
         while (true)
         {
             values.Add(action());
-            if (!ConsumeToken<Comma>())
+            if (IsParseCommaSeparatedEnd())
             {
                 break;
-            }
-
-            if (_options.TrailingCommas)
-            {
-                var token = PeekToken();
-                if (token is Word w)
-                {
-
-                    //if (Keywords.ReservedForColumnAlias.Any(k => k == w.Keyword))
-                    if (Keywords.ReservedForColumnAlias.Contains(w.Keyword))
-                    {
-                        break;
-                    }
-                }
-                else if (token is RightParen or SemiColon or EOF or RightBracket or RightBrace)
-                {
-                    break;
-                }
             }
         }
 
         return values;
     }
+    /// <summary>
+    /// Parse the comma of a comma-separated syntax element.
+    /// Returns true if there is a next element
+    /// </summary>
+    /// <returns></returns>
+    public bool IsParseCommaSeparatedEnd()
+    {
+        if (!ConsumeToken<Comma>())
+        {
+            return true;
+        }
+
+        if (_options.TrailingCommas)
+        {
+            var token = PeekToken();
+            switch (token)
+            {
+                case Word w when Keywords.ReservedForColumnAlias.Contains(w.Keyword):
+                case RightParen 
+                    or SemiColon 
+                    or EOF 
+                    or RightBracket 
+                    or RightBrace:
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Parse a query expression, i.e. a `SELECT` statement optionally
     /// preceded with some `WITH` CTE declarations and optionally followed
@@ -1105,25 +1031,13 @@ public partial class Parser
         Sequence<LockClause>? locks = null;
         Sequence<Expression>? limitBy = null;
         ForClause? forClause = null;
-        Sequence<Setting>? settings = null;
         FormatClause? formatClause = null;
 
         if (!ParseKeyword(Keyword.INSERT))
         {
-            var body = ParseQueryBody(0);
+            var body = ParseQueryBody(0); //TODO prec_unknown
 
-            OrderBy? orderBy = null;
-            if (ParseKeywordSequence(Keyword.ORDER, Keyword.BY))
-            {
-                var orderByExpressions = ParseCommaSeparated(ParseOrderByExpr);
-                Interpolate? interpolate = null;
-                if (_dialect is ClickHouseDialect or GenericDialect)
-                {
-                    interpolate = ParseInterpolations();
-                }
-
-                orderBy = new OrderBy(orderByExpressions, interpolate);
-            }
+            var orderBy = ParseOptionalOrderBy();
 
             for (var i = 0; i < 2; i++)
             {
@@ -1151,18 +1065,8 @@ public partial class Parser
                 limitBy = ParseCommaSeparated(ParseExpr);
             }
 
-            if (_dialect is ClickHouseDialect or GenericDialect && ParseKeyword(Keyword.SETTINGS))
-            {
-                settings = ParseCommaSeparated(() =>
-                {
-                    var key = ParseIdentifier();
-                    ExpectToken<Equal>();
-                    var value = ParseValue();
-
-                    return new Setting(key, value);
-                });
-            }
-
+            var settings = ParseSettings();
+           
             if (ParseKeyword(Keyword.FETCH))
             {
                 fetch = ParseFetch();
@@ -1279,6 +1183,25 @@ public partial class Parser
 
             return null;
         }
+    }
+
+    private Sequence<Setting>? ParseSettings()
+    {
+        Sequence<Setting>? settings = null;
+
+        if (_dialect is ClickHouseDialect or GenericDialect && ParseKeyword(Keyword.SETTINGS))
+        {
+            settings = ParseCommaSeparated(() =>
+            {
+                var key = ParseIdentifier();
+                ExpectToken<Equal>();
+                var value = ParseValue();
+
+                return new Setting(key, value);
+            });
+        }
+
+        return settings;
     }
 
     public static void ThrowExpectedToken(Token expected, Token actual)

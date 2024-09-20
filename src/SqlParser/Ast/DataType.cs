@@ -409,7 +409,7 @@ public abstract record DataType : IWriteSql, IElement
             {
                 if (i > 0)
                 {
-                    writer.Write(", ");
+                    writer.WriteCommaSpaced();
                 }
                 writer.Write($"'{Values[i].EscapeSingleQuoteString()}'");
             }
@@ -743,7 +743,7 @@ public abstract record DataType : IWriteSql, IElement
             {
                 if (i > 0)
                 {
-                    writer.Write(", ");
+                    writer.WriteCommaSpaced();
                 }
 
                 writer.Write($"'{Values[i].EscapeSingleQuoteString()}'");
@@ -775,15 +775,26 @@ public abstract record DataType : IWriteSql, IElement
     ///
     /// Hive: https://docs.cloudera.com/cdw-runtime/cloud/impala-sql-reference/topics/impala-struct.html
     /// BigQuery: https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#struct_type
-    public record Struct(Sequence<StructField> Fields) : DataType
+    public record Struct(Sequence<StructField> Fields, StructBracketKind Bracket) : DataType
     {
         public override void ToSql(SqlTextWriter writer)
         {
-            writer.Write("STRUCT");
-
             if (Fields.SafeAny())
             {
-                writer.Write($"<{Fields.ToSqlDelimited()}>");
+                switch (Bracket)
+                {
+                    case StructBracketKind.Parentheses:
+                        writer.WriteSql($"STRUCT({Fields.ToSqlDelimited()})");
+                        break;
+
+                    case StructBracketKind.AngleBrackets:
+                        writer.Write($"STRUCT<{Fields.ToSqlDelimited()}>");
+                        break;
+                }
+            }
+            else
+            {
+                writer.Write("STRUCT");
             }
         }
     }
@@ -829,6 +840,16 @@ public abstract record DataType : IWriteSql, IElement
         public override void ToSql(SqlTextWriter writer)
         {
             FormatTypeWithOptionalLength(writer, "TINYINT", Length);
+        }
+    }
+    /// <summary>
+    /// Trigger data type, returned by functions associated with triggers
+    /// </summary>
+    public record Trigger : DataType
+    {
+        public override void ToSql(SqlTextWriter writer)
+        {
+            writer.Write("TRIGGER");
         }
     }
     /// <summary>
