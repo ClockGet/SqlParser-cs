@@ -64,34 +64,27 @@ public interface IElement
                 return element;
         }
     }
-
     public IEnumerable<IElement> Descendants()
     {
         var properties = GetVisitableChildProperties(this);
-        var stack = new Stack<IElement>();
-        stack.Push(this);
-
-        while (stack.Count > 0)
+        foreach (var property in properties)
         {
-            var current = stack.Pop();
-
-            var currentProperties = GetVisitableChildProperties(current);
-            foreach (var property in currentProperties)
+            if (!property.PropertyType.IsAssignableTo(typeof(IElement)))
             {
-                if (!property.PropertyType.IsAssignableTo(typeof(IElement)))
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                if (property.GetValue(current) is IElement value)
+            if (property.GetValue(this) is IElement value)
+            {
+                yield return value;
+
+                foreach (var child in value.Descendants())
                 {
-                    yield return value;
-                    stack.Push(value);
+                    yield return child;
                 }
             }
         }
     }
-
 
     private static T VisitChildren<T>(T element, Visitor visitor) where T : IElement
     {
