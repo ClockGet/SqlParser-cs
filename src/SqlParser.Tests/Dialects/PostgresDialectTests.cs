@@ -352,6 +352,24 @@ public class PostgresDialectTests : ParserTestBase
             """;
         OneStatementParsesTo(sql, "CREATE TEMPORARY SEQUENCE IF NOT EXISTS name3 INCREMENT 1 NO MINVALUE MAXVALUE 20 OWNED BY NONE");
 
+        sql = """
+              CREATE SEQUENCE name4
+              AS BIGINT
+              INCREMENT - 15
+              MINVALUE - 2000  MAXVALUE - 50
+              START WITH -60
+              """;
+        OneStatementParsesTo(sql, "CREATE SEQUENCE name4 AS BIGINT INCREMENT -15 MINVALUE -2000 MAXVALUE -50 START WITH -60");
+
+        sql = """
+              CREATE SEQUENCE name5
+              AS BIGINT
+              INCREMENT + 10
+              MINVALUE + 30  MAXVALUE + 5000
+              START WITH +45
+              """;
+        OneStatementParsesTo(sql, "CREATE SEQUENCE name5 AS BIGINT INCREMENT +10 MINVALUE +30 MAXVALUE +5000 START WITH +45");
+
         Assert.Throws<ParserException>(() => ParseSqlStatements("CREATE SEQUENCE foo INCREMENT 1 NO MINVALUE NO"));
     }
 
@@ -2411,8 +2429,8 @@ public class PostgresDialectTests : ParserTestBase
 
         Assert.Equal(new Sequence<SqlOption>
             {
-                new("foo", new LiteralValue(new Value.SingleQuotedString("bar"))),
-                new("a", new LiteralValue(new Value.Number("123"))),
+                new SqlOption.KeyValue("foo", new LiteralValue(new Value.SingleQuotedString("bar"))),
+                new SqlOption.KeyValue("a", new LiteralValue(new Value.Number("123"))),
             }, create.Element.WithOptions);
     }
 

@@ -87,6 +87,13 @@ public record CreateTable([property: Visit(0)] ObjectName Name, [property: Visit
             writer.Write(" ()");
         }
 
+        // Hive table comment should be after column definitions, please refer to:
+        // https://cwiki.apache.org/confluence/display/Hive/LanguageManual+DDL#LanguageManualDDL-CreateTable
+        if(Comment is CommentDef.AfterColumnDefsWithoutEq a)
+        {
+            writer.WriteSql($" COMMENT '{a.Comment}'");
+        }
+
         // Only for SQLite
         if (WithoutRowId)
         {
@@ -110,22 +117,6 @@ public record CreateTable([property: Visit(0)] ObjectName Name, [property: Visit
                 writer.WriteSql($" PARTITIONED BY ({part.Columns.ToSqlDelimited()})");
                 break;
 
-            //case HiveDistributionStyle.Clustered clustered:
-            //{
-            //    writer.WriteSql($" CLUSTERED BY ({clustered.Columns.ToSqlDelimited()})");
-
-            //    if (clustered.SortedBy.SafeAny())
-            //    {
-            //        writer.WriteSql($" SORTED BY ({clustered.SortedBy.ToSqlDelimited()})");
-            //    }
-
-            //    if (clustered.NumBuckets > 0)
-            //    {
-            //        writer.WriteSql($" INTO {clustered.NumBuckets} BUCKETS");
-            //    }
-
-            //    break;
-            //}
             case HiveDistributionStyle.Skewed skewed:
                 writer.WriteSql($" SKEWED BY ({skewed.Columns.ToSqlDelimited()}) ON ({skewed.On.ToSqlDelimited()})");
                 break;
@@ -204,11 +195,11 @@ public record CreateTable([property: Visit(0)] ObjectName Name, [property: Visit
         {
             switch (Comment)
             {
-                case CommentDef.WithEq:
-                    writer.WriteSql($" COMMENT = '{Comment.Comment}'");
+                case CommentDef.WithEq we:
+                    writer.WriteSql($" COMMENT = '{we.Comment}'");
                     break;
-                case CommentDef.WithoutEq:
-                    writer.Write($" COMMENT '{Comment.Comment}'");
+                case CommentDef.WithoutEq w:
+                    writer.Write($" COMMENT '{w.Comment}'");
                     break;
             }
         }

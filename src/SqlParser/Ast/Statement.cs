@@ -636,6 +636,64 @@ public abstract record Statement : IWriteSql, IElement
             writer.WriteSql($"{Element}");
         }
     }
+
+    public record CreatePolicy(Ident Name, ObjectName TableName) : Statement
+    {
+        public CreatePolicyType? PolicyType { get; init; }
+        public CreatePolicyCommand? Command { get; init; }
+        public Sequence<Owner>? To { get; init; }
+        public Expression? Using { get; init; }
+        public Expression? WithCheck { get; init; }
+
+        public override void ToSql(SqlTextWriter writer)
+        {
+            writer.WriteSql($"CREATE POLICY {Name} ON {TableName}");
+
+            switch (PolicyType)
+            {
+                case CreatePolicyType.Permissive:
+                    writer.Write(" AS PERMISSIVE");
+                    break;
+                case CreatePolicyType.Restrictive:
+                    writer.Write(" AS RESTRICTIVE");
+                    break;
+            }
+
+            switch (Command)
+            {
+                case CreatePolicyCommand.All:
+                    writer.Write(" FOR PERMISSIVE");
+                    break;
+                case CreatePolicyCommand.Select:
+                    writer.Write(" FOR SELECT");
+                    break;
+                case CreatePolicyCommand.Insert:
+                    writer.Write(" FOR INSERT");
+                    break;
+                case CreatePolicyCommand.Update:
+                    writer.Write(" FOR UPDATE");
+                    break;
+                case CreatePolicyCommand.Delete:
+                    writer.Write(" FOR DELETE");
+                    break;
+            }
+
+            if (To != null)
+            {
+                writer.WriteSql($" TO {To.ToSqlDelimited()}");
+            }
+
+            if (Using != null)
+            {
+                writer.WriteSql($" USING ({Using})");
+            }
+
+            if (WithCheck != null)
+            {
+                writer.WriteSql($" WITH CHECK ({WithCheck})");
+            }
+        }
+    }
     /// <summary>
     /// MsSql Create Procedure statement
     /// </summary>
@@ -1189,6 +1247,27 @@ public abstract record Statement : IWriteSql, IElement
             writer.WriteSql($"DETACH{keyword}{ifNot} {DatabaseAlias}");
         }
     }
+
+    public record DropPolicy(bool IfExists, Ident Name, ObjectName TableName, ReferentialAction? Option = null) : Statement
+    {
+        public override void ToSql(SqlTextWriter writer)
+        {
+            writer.Write("DROP POLICY");
+
+            if (IfExists)
+            {
+                writer.Write(" IF EXISTS");
+            }
+
+            writer.WriteSql($" {Name} ON {TableName}");
+
+            if (Option != null && Option != ReferentialAction.None)
+            {
+                writer.WriteSql($" {Option}");
+            }
+        }
+    }
+
     public record DropSecret(
         bool IfExists,
         bool? Temporary,
@@ -1370,7 +1449,7 @@ public abstract record Statement : IWriteSql, IElement
             var ifEx = IfExists ? " IF EXISTS" : null;
             writer.WriteSql($"DROP PROCEDURE{ifEx} {ProcDescription.ToSqlDelimited()}");
 
-            if (Option != null)
+            if (Option != null && Option != ReferentialAction.None)
             {
                 writer.Write($" {Option}");
             }
@@ -1393,6 +1472,8 @@ public abstract record Statement : IWriteSql, IElement
         /// Optional output format of explain
         public AnalyzeFormat Format { get; init; }
 
+        public Sequence<UtilityOption>? Options { get; init; }
+
         public override void ToSql(SqlTextWriter writer)
         {
             writer.WriteSql($"{DescribeAlias} ");
@@ -1410,6 +1491,11 @@ public abstract record Statement : IWriteSql, IElement
             if (Format != AnalyzeFormat.None)
             {
                 writer.WriteSql($"FORMAT {Format} ");
+            }
+
+            if (Options != null)
+            {
+                writer.WriteSql($"({Options.ToSqlDelimited()}) ");
             }
 
             Statement.ToSql(writer);
@@ -2164,9 +2250,9 @@ public abstract record Statement : IWriteSql, IElement
         bool Only,
         Sequence<Expression>? Partitions = null,
         TruncateIdentityOption? Identity = null,
-        TruncateCascadeOption? Cascade = null) : Statement
+        TruncateCascadeOption? Cascade = null,
+        Ident? OnCluster = null) : Statement
     {
-
         public override void ToSql(SqlTextWriter writer)
         {
             var table = Table ? "TABLE " : string.Empty;
@@ -2205,6 +2291,11 @@ public abstract record Statement : IWriteSql, IElement
             if (Partitions.SafeAny())
             {
                 writer.WriteSql($" PARTITION ({Partitions})");
+            }
+
+            if (OnCluster != null)
+            {
+                writer.WriteSql($" ON CLUSTER {OnCluster}");
             }
         }
     }

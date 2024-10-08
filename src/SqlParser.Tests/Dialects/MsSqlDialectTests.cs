@@ -1,6 +1,8 @@
-﻿using SqlParser.Ast;
+﻿using System.ComponentModel.DataAnnotations;
+using SqlParser.Ast;
 using SqlParser.Dialects;
 using static SqlParser.Ast.Expression;
+using DataType = SqlParser.Ast.DataType;
 
 // ReSharper disable StringLiteralTypo
 
@@ -278,6 +280,127 @@ public class MsSqlDialectTests : ParserTestBase
                 expected = new Use.Object(new ObjectName(new Ident(objectName, quote)));
                 Assert.Equal(expected, useStatement.Name);
             }
+        }
+    }
+
+    [Fact]
+    public void Parse_Create_Table_With_Valid_Options()
+    {
+        #region queries
+        var options = new List<(string, Sequence<SqlOption>)>
+        {
+            new(
+                "CREATE TABLE mytable (column_a INT, column_b INT, column_c INT) WITH (DISTRIBUTION = ROUND_ROBIN, PARTITION (column_a RANGE FOR VALUES (10, 11)))",
+                [
+
+                    new SqlOption.KeyValue("DISTRIBUTION", new Identifier("ROUND_ROBIN")),
+                    new SqlOption.Partition("column_a",
+                    [
+                        new LiteralValue(new Value.Number("10")),
+                        new LiteralValue(new Value.Number("11"))
+                    ])
+                ]),
+
+            new(
+                "CREATE TABLE mytable (column_a INT, column_b INT, column_c INT) WITH (PARTITION (column_a RANGE LEFT FOR VALUES (10, 11)))",
+                [
+                    new SqlOption.Partition("column_a",
+                        [
+                            new LiteralValue(new Value.Number("10")),
+                            new LiteralValue(new Value.Number("11"))
+                        ],
+                        PartitionRangeDirection.Left)
+                ]),
+
+            new("CREATE TABLE mytable (column_a INT, column_b INT, column_c INT) WITH (CLUSTERED COLUMNSTORE INDEX)",
+            [
+                new SqlOption.Clustered(new TableOptionsClustered.ColumnstoreIndex())
+            ]),
+
+            new(
+                "CREATE TABLE mytable (column_a INT, column_b INT, column_c INT) WITH (CLUSTERED COLUMNSTORE INDEX ORDER (column_a, column_b))",
+                [
+                    new SqlOption.Clustered(new TableOptionsClustered.ColumnstoreIndexOrder([
+                        "column_a",
+                        "column_b",
+                    ]))
+                ]),
+
+            new(
+                "CREATE TABLE mytable (column_a INT, column_b INT, column_c INT) WITH (CLUSTERED INDEX (column_a ASC, column_b DESC, column_c))",
+                [
+                    new SqlOption.Clustered(new TableOptionsClustered.Index([
+                        new ClusteredIndex("column_a", true),
+                        new ClusteredIndex("column_b", false),
+                        new ClusteredIndex("column_c", null)
+                    ]))
+                ]),
+
+            new(
+                "CREATE TABLE mytable (column_a INT, column_b INT, column_c INT) WITH (DISTRIBUTION = HASH(column_a, column_b), HEAP)",
+                [
+                    new SqlOption.KeyValue("DISTRIBUTION",
+                        new Function("HASH")
+                        {
+                            Args = new FunctionArguments.List(new FunctionArgumentList(
+                            [
+                                new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Identifier("column_a"))),
+                                new FunctionArg.Unnamed(new FunctionArgExpression.FunctionExpression(new Identifier("column_b"))),
+                            ]))
+                        }),
+                    new SqlOption.Identifier("HEAP")
+                ])
+        };
+        #endregion
+
+        foreach (var (sql, withOptions) in options)
+        {
+            var create = VerifiedStatement<Statement.CreateTable>(sql);
+
+            Assert.Equal("mytable", create.Element.Name);
+
+            var columns = new Sequence<ColumnDef>
+            {
+                new ("column_a", new DataType.Int()),
+                new ("column_b", new DataType.Int()),
+                new ("column_c", new DataType.Int())
+            };
+
+            Assert.Equal(columns, create.Element.Columns);
+            Assert.Equal(withOptions, create.Element.WithOptions);
+        }
+    }
+
+    [Fact]
+    public void Parse_Create_Table_With_Identity_Column()
+    {
+        var withColumnOptions = new List<(string, Sequence<ColumnOptionDef>)>
+        {
+            ("CREATE TABLE mytable (columnA INT IDENTITY NOT NULL)", 
+                [
+                    new ColumnOptionDef(new ColumnOption.Identity()),
+                    new ColumnOptionDef(new ColumnOption.NotNull())
+                ]),
+
+            ("CREATE TABLE mytable (columnA INT IDENTITY(1, 1) NOT NULL)", [
+                new ColumnOptionDef(
+                    new ColumnOption.Identity(new IdentityProperty(
+                    new LiteralValue(new Value.Number("1")), new LiteralValue(new Value.Number("1"))))),
+                new ColumnOptionDef(new ColumnOption.NotNull())
+            ])
+        };
+
+        foreach (var (sql, columnOptions) in withColumnOptions)
+        {
+            var create = VerifiedStatement<Statement.CreateTable>(sql);
+
+            Sequence<ColumnDef> columns =
+            [
+                new ("columnA", new DataType.Int(), Options: columnOptions)
+            ];
+            var expected = new Statement.CreateTable(new CreateTable("mytable", columns));
+            Assert.Equal(expected, create);
+
         }
     }
 }
