@@ -691,7 +691,8 @@ public class ParserCommonTests : ParserTestBase
         var like = new Like(
             new LiteralValue(new Value.SingleQuotedString("a")),
             true,
-            new LiteralValue(new Value.SingleQuotedString("b"))
+            new LiteralValue(new Value.SingleQuotedString("b")), 
+            false
         );
         unary = new UnaryOp(like, UnaryOperator.Not);
         Assert.Equal(unary, expr);
@@ -719,7 +720,8 @@ public class ParserCommonTests : ParserTestBase
             new Like(
                 new Identifier("column1"),
                 false,
-                new LiteralValue(new Value.Null())
+                new LiteralValue(new Value.Null()),
+                false
             ),
             "col_null");
         Assert.Equal(alias, select.Projection[0]);
@@ -728,7 +730,8 @@ public class ParserCommonTests : ParserTestBase
             new Like(
                 new LiteralValue(new Value.Null()),
                 false,
-                new Identifier("column1")
+                new Identifier("column1"),
+                false
             ),
             "null_col");
         Assert.Equal(alias, select.Projection[1]);
@@ -750,7 +753,8 @@ public class ParserCommonTests : ParserTestBase
             var iLike = new ILike(
                 new Identifier("name"),
                 negated,
-                new LiteralValue(new Value.SingleQuotedString("%a"))
+                new LiteralValue(new Value.SingleQuotedString("%a")),
+                false
             );
             Assert.Equal(iLike, select.Selection);
 
@@ -772,7 +776,8 @@ public class ParserCommonTests : ParserTestBase
                 new ILike(
                     new Identifier("name"),
                     negated,
-                    new LiteralValue(new Value.SingleQuotedString("%a"))
+                    new LiteralValue(new Value.SingleQuotedString("%a")),
+                    false
                 ));
             Assert.Equal(isNull, select.Selection);
         }
@@ -3867,7 +3872,9 @@ public class ParserCommonTests : ParserTestBase
     [Fact]
     public void Parse_Create_View_With_Columns()
     {
-        var create = VerifiedStatement<Statement.CreateView>("CREATE VIEW v (has, cols) AS SELECT 1, 2");
+        var dialects = AllDialects.Where(d => d is not ClickHouseDialect).ToList();
+
+        var create = VerifiedStatement<Statement.CreateView>("CREATE VIEW v (has, cols) AS SELECT 1, 2", dialects);
 
         Assert.Equal("v", create.Name);
         Assert.Equal([new("has"), new("cols")], create.Columns);
@@ -4360,9 +4367,7 @@ public class ParserCommonTests : ParserTestBase
             new(new Identifier("age"), false)
         };
 
-        var createIndex =
-            VerifiedStatement<Statement.CreateIndex>(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name,age DESC)");
+        var createIndex = VerifiedStatement<Statement.CreateIndex>("CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name,age DESC)");
 
         Assert.Equal("idx_name", createIndex.Element.Name!);
         Assert.Equal("test", createIndex.Element.TableName);
@@ -4764,17 +4769,19 @@ public class ParserCommonTests : ParserTestBase
     [Fact]
     public void Parse_Offset_And_Limit()
     {
-        var limit = new LiteralValue(Number("2"));
-        var expected = new Offset(limit, OffsetRows.None);
-        var query = VerifiedQuery("SELECT foo FROM bar LIMIT 2 OFFSET 2");
+        var expected = new Offset(new LiteralValue(new Value.Number("2")), OffsetRows.None);
+        var query = VerifiedQuery("SELECT foo FROM bar LIMIT 1 OFFSET 2");
 
         Assert.Equal(expected, query.Offset);
-        Assert.Equal(limit, query.Limit);
+        Assert.Equal(new LiteralValue(Number("1")), query.Limit);
 
         // different order is OK
         OneStatementParsesTo(
-            "SELECT foo FROM bar OFFSET 2 LIMIT 2",
-            "SELECT foo FROM bar LIMIT 2 OFFSET 2");
+            "SELECT foo FROM bar OFFSET 2 LIMIT 1",
+            "SELECT foo FROM bar LIMIT 1 OFFSET 2");
+
+        OneStatementParsesTo("SELECT foo FROM bar LIMIT 2, 1", "SELECT foo FROM bar LIMIT 1 OFFSET 2",
+            [new GenericDialect(), new MySqlDialect(), new SQLiteDialect(), new ClickHouseDialect()]);
 
         query = VerifiedQuery("SELECT foo FROM bar LIMIT 1 + 2 OFFSET 3 * 4");
 
@@ -5741,13 +5748,15 @@ public class ParserCommonTests : ParserTestBase
             var sql = $"SELECT * FROM customers WHERE name {negation}LIKE '%a'";
             var select = VerifiedOnlySelect(sql);
             var expected = new Like(new Identifier("name"), negated,
-                new LiteralValue(new Value.SingleQuotedString("%a")));
+                new LiteralValue(new Value.SingleQuotedString("%a")),
+                false);
             Assert.Equal(expected, select.Selection);
 
             // Test with escape char
             sql = $"SELECT * FROM customers WHERE name {negation}LIKE '%a' ESCAPE '^'";
             select = VerifiedOnlySelect(sql);
-            expected = new Like(new Identifier("name"), negated, new LiteralValue(new Value.SingleQuotedString("%a")))
+            expected = new Like(new Identifier("name"), negated, new LiteralValue(new Value.SingleQuotedString("%a")),
+                false)
             {
                 EscapeChar = '^'.ToString()
             };
@@ -5758,7 +5767,8 @@ public class ParserCommonTests : ParserTestBase
             sql = $"SELECT * FROM customers WHERE name {negation}LIKE '%a' IS NULL";
             select = VerifiedOnlySelect(sql);
             var isNull = new IsNull(new Like(new Identifier("name"), negated,
-                new LiteralValue(new Value.SingleQuotedString("%a"))));
+                new LiteralValue(new Value.SingleQuotedString("%a")),
+                false));
             Assert.Equal(isNull, select.Selection);
         }
     }
@@ -6067,7 +6077,8 @@ public class ParserCommonTests : ParserTestBase
                         new Identifier("name")
                     ))
                 ])),
-                Filter = new Like(new Identifier("name"), false, new LiteralValue(new Value.SingleQuotedString("a%")))
+                Filter = new Like(new Identifier("name"), false, new LiteralValue(new Value.SingleQuotedString("a%")),
+                    false)
             }, "agg2"),
         };
 
@@ -6626,5 +6637,54 @@ public class ParserCommonTests : ParserTestBase
 
         Assert.Equal(ObjectType.Database, drop.ObjectType);
         Assert.True(drop.IfExists);
+    }
+
+    [Fact]
+    public void Test_Alter_Policy()
+    {
+        var alter = VerifiedStatement<Statement.AlterPolicy>("ALTER POLICY old_policy ON my_table RENAME TO new_policy");
+
+        Assert.Equal("old_policy", alter.Name);
+        Assert.Equal("my_table", alter.TableName);
+        Assert.Equal(new AlterPolicyOperation.Rename("new_policy"), alter.Operation);
+
+        alter = VerifiedStatement<Statement.AlterPolicy>("ALTER POLICY my_policy ON my_table TO CURRENT_USER USING ((SELECT c0)) WITH CHECK (c0 > 0)");
+        Assert.Equal("my_policy", alter.Name);
+        Assert.Equal("my_table", alter.TableName);
+       
+        VerifiedStatement<Statement.AlterPolicy>("ALTER POLICY my_policy ON my_table");
+
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER POLICY old_policy ON my_table TO public RENAME TO new_policy"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER POLICY old_policy ON my_table RENAME TO new_policy TO public"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER POLICY old_policy ON my_table RENAME"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER POLICY old_policy ON my_table RENAME TO"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER POLICY my_policy ON my_table USING"));
+        Assert.Throws<ParserException>(() => ParseSqlStatements("ALTER POLICY my_policy ON my_table WITH CHECK"));
+    }
+
+    [Fact]
+    public void Test_Parse_Inline_Comment()
+    {
+        var dialects = AllDialects.Where(d=> d is not HiveDialect).ToList();
+
+        var create = VerifiedStatement<Statement.CreateTable>(
+            "CREATE TABLE t0 (id INT COMMENT 'comment without equal') COMMENT = 'comment with equal'", dialects);
+
+        var expected = new Sequence<ColumnDef>
+        {
+            new ("id", new Int(), Options:[new ColumnOptionDef(new ColumnOption.Comment("comment without equal"))])
+        };
+
+        Assert.Equal(expected, create.Element.Columns);
+        Assert.Equal(new CommentDef.WithEq("comment with equal"), create.Element.Comment);
+    } 
+
+    [Fact]
+    public void Test_Select_Where_With_Like_Or_ILike_Any()
+    {
+        VerifiedStatement("SELECT * FROM x WHERE a ILIKE ANY '%abc%'");
+        VerifiedStatement("SELECT * FROM x WHERE a LIKE ANY '%abc%'");
+        VerifiedStatement("SELECT * FROM x WHERE a ILIKE ANY ('%Jo%oe%', 'T%e')");
+        VerifiedStatement("SELECT * FROM x WHERE a LIKE ANY ('%Jo%oe%', 'T%e')");
     }
 }

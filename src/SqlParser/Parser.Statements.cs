@@ -202,15 +202,10 @@ public partial class Parser
         {
             var attributeName = ParseIdentifier();
             var attributeDataType = ParseDataType();
-            ObjectName? attributeCollation = null;
+            var attributeCollation = ParseInit (ParseKeyword(Keyword.COLLATE),  ParseObjectName);
 
-            if (ParseKeyword(Keyword.COLLATE))
-            {
-                attributeCollation = ParseObjectName();
-            }
-
-            attributes.Add(
-                new UserDefinedTypeCompositeAttributeDef(attributeName, attributeDataType, attributeCollation));
+            attributes.Add(new UserDefinedTypeCompositeAttributeDef(attributeName, attributeDataType, attributeCollation));
+            
             var comma = ConsumeToken<Comma>();
             if (ConsumeToken<RightParen>())
             {
@@ -928,7 +923,7 @@ public partial class Parser
         var names = ParseCommaSeparated(ParseIdentifier);
 
         var token = PeekToken();
-        DataType? dataType = token switch
+        var dataType = token switch
         {
             Word { Keyword: Keyword.DEFAULT } => null,
             _ => ParseDataType()
@@ -951,11 +946,7 @@ public partial class Parser
             expression = ParseExpr();
         }
 
-        DeclareAssignment? declaration = null;
-        if (expression != null)
-        {
-            declaration = new DeclareAssignment.Default(expression);
-        }
+        DeclareAssignment? declaration = ParseInit(expression != null, () => new DeclareAssignment.Default(expression));
 
         return new Statement.Declare([new Declare(names, dataType, declaration, null)]);
     }
@@ -1390,7 +1381,7 @@ public partial class Parser
 
     public Statement ParseAlter()
     {
-        var objectType = ExpectOneOfKeywords(Keyword.VIEW, Keyword.TABLE, Keyword.INDEX, Keyword.ROLE);
+        var objectType = ExpectOneOfKeywords(Keyword.VIEW, Keyword.TABLE, Keyword.INDEX, Keyword.ROLE, Keyword.POLICY);
 
         switch (objectType)
         {
@@ -1456,9 +1447,32 @@ public partial class Parser
             case Keyword.ROLE:
                 return ParseAlterRole();
 
+            case Keyword.POLICY:
+                return ParseAlterPolicy();
+
             default:
                 throw new ParserException("ParseAlter");
         }
+    }
+
+    public Statement ParseAlterPolicy()
+    {
+        var name = ParseIdentifier();
+        ExpectKeyword(Keyword.ON);
+        var tableName = ParseObjectName();
+
+        if (ParseKeyword(Keyword.RENAME))
+        {
+            ExpectKeyword(Keyword.TO);
+            var newName = ParseIdentifier();
+            return new AlterPolicy(name, tableName, new AlterPolicyOperation.Rename(newName));
+        }
+
+        var to = ParseInit(ParseKeyword(Keyword.TO), () => ParseCommaSeparated(ParseOwner));
+        var @using = ParseInit(ParseKeyword(Keyword.USING), () => ExpectParens(ParseExpr));
+        var withCheck = ParseInit(ParseKeywordSequence(Keyword.WITH, Keyword.CHECK), () => ExpectParens(ParseExpr));
+
+        return new AlterPolicy(name, tableName, new AlterPolicyOperation.Apply(to, @using, withCheck));
     }
 
     public Statement ParseCall()
@@ -1520,14 +1534,9 @@ public partial class Parser
     private Statement ParsePgAlterRole()
     {
         var roleName = ParseIdentifier();
-        ObjectName? inDatabase = null;
         AlterRoleOperation operation;
-
-        if (ParseKeywordSequence(Keyword.IN, Keyword.DATABASE))
-        {
-            inDatabase = ParseObjectName();
-        }
-
+        var inDatabase = ParseInit(ParseKeywordSequence(Keyword.IN, Keyword.DATABASE),  ParseObjectName);
+        
         if (ParseKeyword(Keyword.RENAME))
         {
             if (ParseKeyword(Keyword.TO))
@@ -1828,12 +1837,7 @@ public partial class Parser
         ExpectKeyword(Keyword.TO);
         var grantees = ParseCommaSeparated(ParseIdentifier);
         var withGrantOptions = ParseKeywordSequence(Keyword.WITH, Keyword.GRANT, Keyword.OPTION);
-        Ident? grantedBy = null;
-
-        if (ParseKeywordSequence(Keyword.GRANTED, Keyword.BY))
-        {
-            grantedBy = ParseIdentifier();
-        }
+        var grantedBy = ParseInit (ParseKeywordSequence(Keyword.GRANTED, Keyword.BY),ParseIdentifier);
 
         return new Grant(privileges, grantObjects, grantees, withGrantOptions, grantedBy);
     }
@@ -1997,9 +2001,7 @@ public partial class Parser
         var table = ParseTableAndJoins();
         ExpectKeyword(Keyword.SET);
         var assignments = ParseCommaSeparated(ParseAssignment);
-        TableWithJoins? from = null;
-
-        if (ParseKeyword(Keyword.FROM) && _dialect
+        var from = ParseInit (ParseKeyword(Keyword.FROM) && _dialect
                 is GenericDialect
                 or PostgreSqlDialect
                 or DuckDbDialect
@@ -2007,10 +2009,8 @@ public partial class Parser
                 or SnowflakeDialect
                 or RedshiftDialect
                 or MsSqlDialect
-                or SQLiteDialect)
-        {
-            from = ParseTableAndJoins();
-        }
+                or SQLiteDialect, 
+            ParseTableAndJoins);
 
         var selection = ParseInit(ParseKeyword(Keyword.WHERE), ParseExpr);
         var returning = ParseInit(ParseKeyword(Keyword.RETURNING), () => ParseCommaSeparated(ParseSelectItem));

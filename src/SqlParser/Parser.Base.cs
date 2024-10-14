@@ -737,18 +737,18 @@ public partial class Parser
 
                         if (ParseKeyword(Keyword.LIKE))
                         {
-                            return new Like(expr, negated, 
-                                ParseSubExpression(_dialect.GetPrecedence(Precedence.Like)), 
-                                ParseEscapeChar());
+                            var any = ParseKeyword(Keyword.ANY);
+                            var sub = ParseSubExpression(_dialect.GetPrecedence(Precedence.Like));
+                            var escape = ParseEscapeChar();
+                            return new Like(expr, negated, sub, escape, any);
                         }
 
                         if (ParseKeyword(Keyword.ILIKE))
                         {
-                            return new ILike(
-                                expr, 
-                                negated, 
-                                ParseSubExpression(_dialect.GetPrecedence(Precedence.Like)), 
-                                ParseEscapeChar());
+                            var any = ParseKeyword(Keyword.ANY);
+                            var sub = ParseSubExpression(_dialect.GetPrecedence(Precedence.Like));
+                            var escape = ParseEscapeChar();
+                            return new ILike(expr, negated, sub, escape, any);
                         }
 
                         if (ParseKeywordSequence(Keyword.SIMILAR, Keyword.TO))
@@ -1058,7 +1058,7 @@ public partial class Parser
                     offset = ParseOffset();
                 }
 
-                if (_dialect is GenericDialect or MySqlDialect or ClickHouseDialect && limit != null && offset == null && ConsumeToken<Comma>())
+                if (_dialect.SupportsLimitComma && limit != null && offset == null && ConsumeToken<Comma>())
                 {
                     // MySQL style LIMIT x,y => LIMIT y OFFSET x.
                     // Check <https://dev.mysql.com/doc/refman/8.0/en/select.html> for more details.
@@ -1194,19 +1194,19 @@ public partial class Parser
 
     private Sequence<Setting>? ParseSettings()
     {
-        Sequence<Setting>? settings = null;
-
-        if (_dialect is ClickHouseDialect or GenericDialect && ParseKeyword(Keyword.SETTINGS))
-        {
-            settings = ParseCommaSeparated(() =>
+        var settings = ParseInit(
+            _dialect is ClickHouseDialect or GenericDialect && ParseKeyword(Keyword.SETTINGS),
+            () =>
             {
-                var key = ParseIdentifier();
-                ExpectToken<Equal>();
-                var value = ParseValue();
+                return ParseCommaSeparated(() =>
+                {
+                    var key = ParseIdentifier();
+                    ExpectToken<Equal>();
+                    var value = ParseValue();
 
-                return new Setting(key, value);
+                    return new Setting(key, value);
+                });
             });
-        }
 
         return settings;
     }
