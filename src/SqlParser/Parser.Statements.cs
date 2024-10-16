@@ -798,6 +798,10 @@ public partial class Parser
         {
             objectType = ObjectType.Stage;
         }
+        else if (ParseKeyword(Keyword.TYPE))
+        {
+            objectType = ObjectType.Type;
+        }
         else if (ParseKeyword(Keyword.FUNCTION))
         {
             return ParseDropFunction();
@@ -821,7 +825,7 @@ public partial class Parser
 
         if (objectType == null)
         {
-            throw Expected("TABLE, VIEW, INDEX, ROLE, SCHEMA, DATABASE, FUNCTION, PROCEDURE, STAGE, TRIGGER, SECRET or SEQUENCE after DROP", PeekToken());
+            throw Expected("TABLE, VIEW, INDEX, ROLE, SCHEMA, DATABASE, FUNCTION, PROCEDURE, STAGE, TRIGGER, SECRET,SEQUENCE, or TYPE after DROP", PeekToken());
         }
 
         // Many dialects support the non-standard `IF EXISTS` clause and allow
@@ -1011,6 +1015,7 @@ public partial class Parser
     {
         var analyze = false;
         var verbose = false;
+        var queryPlan = false;
         var format = AnalyzeFormat.None;
         Sequence<UtilityOption>? options = null;
 
@@ -1019,6 +1024,10 @@ public partial class Parser
         if (_dialect.SupportsExplainWithUtilityOptions && describeAlias == DescribeAlias.Explain && PeekToken() is LeftParen)
         {
             options = ParseUtilityOptions();
+        }
+        else if (ParseKeywordSequence(Keyword.QUERY, Keyword.PLAN))
+        {
+            queryPlan = true;
         }
         else
         {
@@ -1038,7 +1047,8 @@ public partial class Parser
                 Analyze = analyze,
                 Verbose = verbose,
                 Format = format,
-                Options = options
+                Options = options,
+                QueryPlan = queryPlan
             },
             _ => ParseDescribeFormat()
         };
